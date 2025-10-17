@@ -25,7 +25,7 @@ class DefaultSource : public Source {
   virtual ~DefaultSource();
 
 
-  void setDataSource(const char *url);
+  status_t setDataSource(const char *url);
 
   void prepareAsync() override;
 

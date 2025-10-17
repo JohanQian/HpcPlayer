@@ -10,21 +10,21 @@
 
 namespace hpc {
 
-void Source::notifyFlagsChanged(uint32_t flags) {
+void Source::notifyFlagsChanged(uint32_t flags) const {
   std::shared_ptr<Message> notify = dupNotify();
   notify->mWhat = kWhatFlagsChanged;
   notify->mArg1 = flags;
   notify->post();
 }
 
-void Source::notifyVideoSizeChanged(const std::shared_ptr<Message> &format) {
+void Source::notifyVideoSizeChanged(const std::shared_ptr<Message> &format) const {
   std::shared_ptr<Message> notify = dupNotify();
   notify->mWhat = kWhatVideoSizeChanged;
   notify->mObj1 = format.get();
   notify->post();
 }
 
-void Source::notifyPrepared(status_t err) {
+void Source::notifyPrepared(status_t err) const {
   ALOGV("Source::notifyPrepared %d", err);
   std::shared_ptr<Message> notify = dupNotify();
   notify->mWhat = kWhatPrepared;
@@ -43,7 +43,12 @@ void Source::notifyInstantiateSecureDecoders(const std::shared_ptr<Message> &rep
 void Source::onMessageReceived(const std::shared_ptr<Message> & /* msg */) {
 
 }
+
 std::shared_ptr<Message> Source::dupNotify() const {
   return mNotify->dup();
+}
+
+std::shared_ptr<Message> Source::getFormat(bool audio) {
+  return std::shared_ptr<Message>();
 }
 } // hpc

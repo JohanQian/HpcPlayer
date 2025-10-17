@@ -151,5 +151,8 @@ int Looper::postReply(const std::shared_ptr<AReplyToken> &replyToken, const std:
 Looper::handler_id Looper::registerHandler(enable_shared_from_this <Handler> handler) {
   return 0;
 }
+void Looper::unregisterHandler(Looper::handler_id handlerID) {
+
+}
 
 }  // namespace android

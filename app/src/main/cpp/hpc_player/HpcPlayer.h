@@ -8,69 +8,40 @@
 #include <stdint.h>
 #include "Handler.h"
 #include "Error.h"
+#include "foundation/BaseType.h"
 
 namespace hpc {
 class ANativeWindow;
 class HpcPlayerInternal;
 class MediaClock;
-
-enum media_event_type {
-  MEDIA_NOP               = 0, // interface test message
-  MEDIA_PREPARED          = 1,
-  MEDIA_PLAYBACK_COMPLETE = 2,
-  MEDIA_BUFFERING_UPDATE  = 3,
-  MEDIA_SEEK_COMPLETE     = 4,
-  MEDIA_SET_VIDEO_SIZE    = 5,
-  MEDIA_STARTED           = 6,
-  MEDIA_PAUSED            = 7,
-  MEDIA_STOPPED           = 8,
-  MEDIA_SKIPPED           = 9,
-  MEDIA_NOTIFY_TIME       = 98,
-  MEDIA_TIMED_TEXT        = 99,
-  MEDIA_ERROR             = 100,
-  MEDIA_INFO              = 200,
-  MEDIA_SUBTITLE_DATA     = 201,
-  MEDIA_META_DATA         = 202,
-  MEDIA_TIME_DISCONTINUITY = 211,
-  MEDIA_IMS_RX_NOTICE     = 300,
-  MEDIA_AUDIO_ROUTING_CHANGED = 10000,
-};
-
-enum SeekMode : int32_t {
-  SEEK_PREVIOUS_SYNC = 0,
-  SEEK_NEXT_SYNC,
-  SEEK_CLOSEST_SYNC,
-  SEEK_CLOSEST,
-  SEEK_FRAME_INDEX,
-};
-
+class Surface;
 
 class HpcPlayer{
  public:
   status_t setDataSource(const char* url);
-  status_t setSurface(ANativeWindow* window);
+  status_t setSurface(Surface* surface);
   status_t prepare();
   status_t start();
   status_t pause();
   status_t stop();
-  status_t seekTo(int64_t mesc);
+  status_t seekTo(
+      int64_t seekTimeUs,
+      SeekMode mode = SEEK_PREVIOUS_SYNC,
+      bool needNotify = false);
   status_t getCurrentPosition(int64_t *postion);
   status_t getDuration(int64_t *duration);
   bool isPlaying();
   void release();
 
   void notifySetDataSourceCompleted(status_t err);
-//  void notifyPrepareCompleted(status_t err);
-//  void notifyResetComplete();
-//  void notifySetSurfaceComplete();
+  void notifyPrepareCompleted(status_t err);
+  void notifyResetComplete();
+  void notifySetSurfaceComplete();
   void notifyDuration(int64_t durationUs);
-//  void notifyMorePlayingTimeUs(int64_t timeUs);
-//  void notifyMoreRebufferingTimeUs(int64_t timeUs);
-//  void notifyRebufferingWhenExit(bool status);
-//  void notifySeekComplete();
-//  void notifySeekComplete_l();
-//  void notifyListener(int msg, int ext1 = 0, int ext2 = 0);
-//  void notifyFlagsChanged(uint32_t flags);
+  void notifyPlayingTimeUs(int64_t timeUs);
+  void notifySeekComplete();
+  void notifySeekComplete_l();
+  void notifyListener(int msg, int ext1 = 0, int ext2 = 0);
 
  protected:
   virtual ~HpcPlayer();
@@ -107,11 +78,7 @@ class HpcPlayer{
   const std::shared_ptr<MediaClock> mMediaClock;
   const std::shared_ptr<HpcPlayerInternal> mPlayer;
   uint32_t mPlayerFlags;
-
-//  mutable Mutex mAudioSinkLock;
-//  sp<AudioSink> mAudioSink GUARDED_BY(mAudioSinkLock);
-//  int32_t mCachedPlayerIId GUARDED_BY(mAudioSinkLock);
-
+  
   bool mAtEOS;
   bool mLooping;
   bool mAutoLoop;

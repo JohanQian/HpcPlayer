@@ -32,7 +32,7 @@ struct Handler :public std::enable_shared_from_this<Handler> {
   }
 
  protected:
-  virtual void onMessageReceived(const std::shared_ptr<Message> &msg) = 0;
+  virtual void onMessageReceived(const std::shared_ptr<Message>& msg) = 0;
 
  private:
   friend struct Message;      // deliverMessage()
@@ -41,16 +41,16 @@ struct Handler :public std::enable_shared_from_this<Handler> {
   Looper::handler_id mID;
   std::weak_ptr<Looper> mLooper;
 
-  inline void setID(Looper::handler_id id, const std::weak_ptr<Looper> &looper) {
+  inline void setID(Looper::handler_id id, const std::weak_ptr<Looper>& looper) {
     mID = id;
     mLooper = looper;
   }
 
-  bool mVerboseStats;
+  bool mVerboseStats{};
   uint64_t mMessageCounter;
   std::map<uint32_t, uint32_t> mMessages;
 
-  void deliverMessage(const std::shared_ptr<Message> &msg);
+  void deliverMessage(const std::shared_ptr<Message>& msg);
 
   //DISALLOW_EVIL_CONSTRUCTORS(Handler);
 };

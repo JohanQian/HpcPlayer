@@ -24,8 +24,9 @@ DefaultSource::~DefaultSource() {
 
 }
 
-void DefaultSource::setDataSource(const char *url) {
+status_t DefaultSource::setDataSource(const char *url) {
   mUri = url;
+  return OK;
 }
 
 void DefaultSource::prepareAsync() {

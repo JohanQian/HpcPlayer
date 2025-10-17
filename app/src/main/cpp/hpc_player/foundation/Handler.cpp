@@ -9,4 +9,5 @@ void Handler::deliverMessage(const std::shared_ptr<Message> &msg) {
   onMessageReceived(msg);
   mMessageCounter++;
 }
+
 } // hpc

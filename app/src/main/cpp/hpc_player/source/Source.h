@@ -44,7 +44,7 @@ class Source : public Handler {
 
   Source(const Source &) = delete;
   Source &operator=(const Source &) = delete;
-  virtual void prepareAsync() {};
+  virtual void  prepareAsync() {};
 
   virtual void start() {};
   virtual void stop() {}
@@ -54,6 +54,7 @@ class Source : public Handler {
   // Explicitly disconnect the underling data source
   virtual void disconnect() {}
 
+  virtual std::shared_ptr<Message> getFormat(bool audio);
   virtual std::shared_ptr<MetaData> getFormatMeta(bool /* audio */) { return nullptr; }
 
 //  virtual status_t dequeueAccessUnit(
@@ -88,10 +89,10 @@ class Source : public Handler {
 
   std::shared_ptr<Message> dupNotify() const;
   void onMessageReceived(const std::shared_ptr<Message> &msg) override;
-  void notifyFlagsChanged(uint32_t flags);
-  void notifyVideoSizeChanged(const std::shared_ptr<Message> &format = nullptr);
+  void notifyFlagsChanged(uint32_t flags) const;
+  void notifyVideoSizeChanged(const std::shared_ptr<Message> &format = nullptr) const;
   void notifyInstantiateSecureDecoders(const std::shared_ptr<Message> &reply);
-  void notifyPrepared(status_t err = OK);
+  void notifyPrepared(status_t err = OK) const;
 
  private:
   std::shared_ptr<Message> mNotify;

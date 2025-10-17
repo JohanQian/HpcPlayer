@@ -18,6 +18,12 @@ file(GLOB NV_SOURCES ${CMAKE_CURRENT_LIST_DIR}/hpc_player/source/*.cpp)
 include_directories(${CMAKE_CURRENT_LIST_DIR}/hpc_player/extractor)
 file(GLOB EXTRACTOR ${CMAKE_CURRENT_LIST_DIR}/hpc_player/extractor/*.cpp)
 
+include_directories(${CMAKE_CURRENT_LIST_DIR}/hpc_player/decoder)
+file(GLOB DECODER ${CMAKE_CURRENT_LIST_DIR}/hpc_player/decoder/*.cpp)
+
+include_directories(${CMAKE_CURRENT_LIST_DIR}/hpc_player/render)
+file(GLOB RENDERER ${CMAKE_CURRENT_LIST_DIR}/hpc_player/render/*.cpp)
+
 
 # 添加NDK和FFmpeg库
 find_library(log-lib log)
@@ -30,6 +36,8 @@ add_library(
         ${NV_SOURCES}
         ${NV_FOUNDATION}
         ${EXTRACTOR}
+        ${DECODER}
+        ${RENDERER}
         native-lib.cpp
         hpc_player/HpcPlayer.cpp
         hpc_player/HpcPlayer.h

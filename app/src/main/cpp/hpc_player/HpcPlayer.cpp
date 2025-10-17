@@ -23,12 +23,12 @@ status_t HpcPlayer::setDataSource(const char *url) {
 
   mPlayer->setDataSourceAsync(url);
 
-  mCondition.wait(lck,[this](){return mState == STATE_SET_DATASOURCE_PENDING;});
+  mCondition.wait(lck,[this](){return mState != STATE_SET_DATASOURCE_PENDING;});
 
   return mAsyncResult;
 }
 
-status_t HpcPlayer::setSurface(ANativeWindow *window) {
+status_t HpcPlayer::setSurface(Surface* surface) {
   ALOGV("setVideoSurfaceTexture(%p)", this);
   std::lock_guard autoLock(mLock);
 
@@ -41,7 +41,7 @@ status_t HpcPlayer::setSurface(ANativeWindow *window) {
       break;
   }
 
-  mPlayer->setVideoSurface(window);
+  mPlayer->setVideoSurface(surface);
   return OK;
 }
 
@@ -185,11 +185,11 @@ status_t HpcPlayer::stop() {
   return OK;
 }
 
-status_t HpcPlayer::seekTo(int64_t msec) {
-  ALOGV("seekTo(%p) (%d ms, %d) at state %d", this, msec, mode, mState);
+status_t HpcPlayer::seekTo(int64_t seekTimeUs,
+                           SeekMode mode,
+                           bool needNotify) {
+  ALOGV("seekTo(%p) (%d ms, %d) at state %d", this, seekTimeUs, mode, mState);
   std::lock_guard autoLock(mLock);
-
-  int64_t seekTimeUs = msec * 1000LL;
 
   switch (mState) {
     case STATE_PREPARED:
@@ -254,19 +254,26 @@ bool HpcPlayer::isPlaying() {
   return mState == STATE_RUNNING && !mAtEOS;
 }
 
-status_t HpcPlayer::release() {
-
-}
-
 std::string HpcPlayer::stateString(HpcPlayer::State state) {
   return std::string();
 }
 
 void HpcPlayer::notifySetDataSourceCompleted(status_t err) {
+  std::lock_guard autoLock(mLock);
 
+  if(mState == STATE_SET_DATASOURCE_PENDING) {
+    return;
+  }
+
+  mAsyncResult = err;
+  mState = (err == OK) ? STATE_UNPREPARED : STATE_IDLE;
+  mCondition.notify_all();
 }
 
 void HpcPlayer::notifyDuration(int64_t durationUs) {
+
+}
+void HpcPlayer::notifyPrepareCompleted(status_t err) {
 
 }
 

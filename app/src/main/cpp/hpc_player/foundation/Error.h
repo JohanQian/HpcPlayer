@@ -4,6 +4,11 @@
 #include <errno.h>
 
 namespace hpc {
+
+#define DISALLOW_EVIL_CONSTRUCTORS(name) \
+    name(const name &); \
+    name &operator=(const name &) /* NOLINT */
+
 // use this type to return error codes
 #ifdef HAVE_MS_C_RUNTIME
 typedef int         status_t;

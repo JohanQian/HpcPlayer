@@ -2,14 +2,127 @@
 #include "foundation/Message.h"
 #include "foundation/Log.h"
 #include "foundation/MetaData.h"
+#include "foundation/Surface.h"
 #include "source/Source.h"
+#include "source/DefaultSource.h"
+#include "DecoderBase.h"
 #include "HpcPlayer.h"
 #include <android/native_window.h>
-
+#include "HpcPlayer.h"
+#include <android/native_window.h>
+#include <android/native_window_jni.h>
 #define LOG_TAG "HpcPlayerInternal"
 
 namespace hpc {
-HpcPlayerInternal::HpcPlayerInternal(pid_t pid, const std::shared_ptr<MediaClock> &mediaClock) {
+
+struct HpcPlayerInternal::Action {
+  Action() = default;
+
+  virtual void execute(HpcPlayerInternal *player) = 0;
+
+ private:
+  DISALLOW_EVIL_CONSTRUCTORS(Action);
+};
+
+struct HpcPlayerInternal::SeekAction : public Action {
+  explicit SeekAction(int64_t seekTimeUs, SeekMode mode)
+      : mSeekTimeUs(seekTimeUs),
+        mMode(mode) {
+  }
+
+  void execute(HpcPlayerInternal *player) override {
+    player->performSeek(mSeekTimeUs, mMode);
+  }
+
+ private:
+  int64_t mSeekTimeUs;
+  SeekMode mMode;
+
+  DISALLOW_EVIL_CONSTRUCTORS(SeekAction);
+};
+
+struct HpcPlayerInternal::ResumeDecoderAction : public Action {
+  explicit ResumeDecoderAction(bool needNotify)
+      : mNeedNotify(needNotify) {
+  }
+
+  void execute(HpcPlayerInternal *player) override {
+    player->performResumeDecoders(mNeedNotify);
+  }
+
+ private:
+  bool mNeedNotify;
+
+  DISALLOW_EVIL_CONSTRUCTORS(ResumeDecoderAction);
+};
+
+struct HpcPlayerInternal::SetSurfaceAction : public Action {
+  explicit SetSurfaceAction(const std::shared_ptr<Surface> &surface)
+      : mSurface(surface) {
+  }
+
+  virtual void execute(HpcPlayerInternal *player) {
+    player->performSetSurface(mSurface);
+  }
+
+ private:
+  std::shared_ptr<Surface> mSurface;
+
+  DISALLOW_EVIL_CONSTRUCTORS(SetSurfaceAction);
+};
+
+struct HpcPlayerInternal::FlushDecoderAction : public Action {
+  FlushDecoderAction(FlushCommand audio, FlushCommand video)
+      : mAudio(audio),
+        mVideo(video) {
+  }
+
+  virtual void execute(HpcPlayerInternal *player) {
+    player->performDecoderFlush(mAudio, mVideo);
+  }
+
+ private:
+  FlushCommand mAudio;
+  FlushCommand mVideo;
+
+  DISALLOW_EVIL_CONSTRUCTORS(FlushDecoderAction);
+};
+
+struct HpcPlayerInternal::PostMessageAction : public Action {
+  explicit PostMessageAction(const std::shared_ptr<Message> &msg)
+      : mMessage(msg) {
+  }
+
+  virtual void execute(HpcPlayerInternal *) {
+    mMessage->post();
+  }
+
+ private:
+  std::shared_ptr<Message> mMessage;
+
+  DISALLOW_EVIL_CONSTRUCTORS(PostMessageAction);
+};
+
+// Use this if there's no state necessary to save in order to execute
+// the action.
+struct HpcPlayerInternal::SimpleAction : public Action {
+  typedef void (HpcPlayerInternal::*ActionFunc)();
+
+  explicit SimpleAction(ActionFunc func)
+      : mFunc(func) {
+  }
+
+  virtual void execute(HpcPlayerInternal *player) {
+    (player->*mFunc)();
+  }
+
+ private:
+  ActionFunc mFunc;
+
+  DISALLOW_EVIL_CONSTRUCTORS(SimpleAction);
+};
+
+HpcPlayerInternal::HpcPlayerInternal(const std::shared_ptr<MediaClock> &mediaClock) {
 
 }
 
@@ -18,12 +131,248 @@ HpcPlayerInternal::~HpcPlayerInternal() {
 }
 
 void HpcPlayerInternal::setDataSourceAsync(const char *url) {
+  std::shared_ptr<Message> msg = std::make_shared<Message>(kWhatSetDataSource, shared_from_this());
+  std::shared_ptr<Message> notify = std::make_shared<Message>(kWhatSourceNotify, shared_from_this());
 
+  auto* source = new DefaultSource(notify, mUIDValid, mUID, mMediaClock);
+  status_t err = source->setDataSource(url);
+
+  if (err != OK) {
+    ALOGE("Failed to set data source!");
+    source = nullptr;
+  }
+
+  msg->setObject("source", source);
+  msg->post();
 }
 
 
-status_t HpcPlayerInternal::setVideoSurface(ANativeWindow *window) {
+status_t HpcPlayerInternal::setVideoSurface(Surface *surface) {
   return 0;
+}
+
+void HpcPlayerInternal::flushDecoder(bool audio, bool needShutdown) {
+  ALOGV("[%s] flushDecoder needShutdown=%d",
+        audio ? "audio" : "video", needShutdown);
+
+  std::shared_ptr<Decoder> decoder = getDecoder(audio);
+  if (decoder == nullptr) {
+    ALOGI("flushDecoder %s without decoder present",
+          audio ? "audio" : "video");
+    return;
+  }
+
+  // Make sure we don't continue to scan sources until we finish flushing.
+  ++mScanSourcesGeneration;
+  if (mScanSourcesPending) {
+    if (!needShutdown) {
+      mDeferredActions.push_back(
+          std::make_shared<SimpleAction>(&HpcPlayerInternal::performScanSources));
+    }
+    mScanSourcesPending = false;
+  }
+
+  decoder->signalFlush();
+
+  FlushStatus newStatus =
+      needShutdown ? FLUSHING_DECODER_SHUTDOWN : FLUSHING_DECODER;
+
+  mFlushComplete[audio][false /* isDecoder */] = (mRenderer == NULL);
+  mFlushComplete[audio][true /* isDecoder */] = false;
+  if (audio) {
+    ALOGE_IF(mFlushingAudio != NONE,
+             "audio flushDecoder() is called in state %d", mFlushingAudio);
+    mFlushingAudio = newStatus;
+  } else {
+    ALOGE_IF(mFlushingVideo != NONE,
+             "video flushDecoder() is called in state %d", mFlushingVideo);
+    mFlushingVideo = newStatus;
+  }
+}
+
+void HpcPlayerInternal::processDeferredActions() {
+  while (!mDeferredActions.empty()) {
+    // We won't execute any deferred actions until we're no longer in
+    // an intermediate state, i.e. one more more decoders are currently
+    // flushing or shutting down.
+
+    if (mFlushingAudio != NONE || mFlushingVideo != NONE) {
+      // We're currently flushing, postpone the reset until that's
+      // completed.
+
+      ALOGV("postponing action mFlushingAudio=%d, mFlushingVideo=%d",
+            mFlushingAudio, mFlushingVideo);
+
+      break;
+    }
+
+    std::shared_ptr<Action> action = *mDeferredActions.begin();
+    mDeferredActions.erase(mDeferredActions.begin());
+
+    action->execute(this);
+  }
+}
+
+void HpcPlayerInternal::performSeek(int64_t seekTimeUs, SeekMode mode) {
+  ALOGV("performSeek seekTimeUs=%lld us (%.2f secs), mode=%d",
+        (long long)seekTimeUs, seekTimeUs / 1E6, mode);
+
+  if (mSource == nullptr) {
+    // This happens when reset occurs right before the loop mode
+    // asynchronously seeks to the start of the stream. 
+    if (mAudioDecoder != nullptr || mVideoDecoder != nullptr) {
+      ALOGE("mSource is nullptr and decoders not nullptr audio(%p) video(%p)",
+            mAudioDecoder.get(), mVideoDecoder.get());
+    }
+    return;
+  }
+  mPreviousSeekTimeUs = seekTimeUs;
+  mSource->seekTo(seekTimeUs, mode);
+  ++mTimedTextGeneration;
+
+  // everything's flushed, continue playback.
+}
+
+void HpcPlayerInternal::performDecoderFlush(FlushCommand audio, FlushCommand video) {
+  ALOGV("performDecoderFlush audio=%d, video=%d", audio, video);
+
+  if ((audio == FLUSH_CMD_NONE || mAudioDecoder == nullptr)
+      && (video == FLUSH_CMD_NONE || mVideoDecoder == nullptr)) {
+    return;
+  }
+
+  if (audio != FLUSH_CMD_NONE && mAudioDecoder != nullptr) {
+    flushDecoder(true /* audio */, (audio == FLUSH_CMD_SHUTDOWN));
+  }
+
+  if (video != FLUSH_CMD_NONE && mVideoDecoder != nullptr) {
+    flushDecoder(false /* audio */, (video == FLUSH_CMD_SHUTDOWN));
+  }
+}
+
+void HpcPlayerInternal::performReset() {
+  ALOGV("performReset");
+
+  if(mVideoDecoder == nullptr || mAudioDecoder == nullptr) {
+    return;
+  }
+
+  updatePlaybackTimer(true /* stopping */, "performReset");
+  updateRebufferingTimer(true /* stopping */, true /* exiting */);
+
+  cancelPollDuration();
+
+  ++mScanSourcesGeneration;
+  mScanSourcesPending = false;
+
+  if (mRendererLooper != nullptr) {
+    if (mRenderer != nullptr) {
+      mRendererLooper->unregisterHandler(mRenderer->id());
+    }
+    mRendererLooper->stop();
+    mRendererLooper.clear();
+  }
+  mRenderer.clear();
+  ++mRendererGeneration;
+
+  if (mSource != nullptr) {
+    mSource->stop();
+
+    std::lock_guard<std::mutex> autoLock(mSourceLock);
+    mSource.clear();
+  }
+
+  if (!mPlayer.expired()) {
+    std::shared_ptr<HpcPlayer> driver = mPlayer.lock();
+    if (driver != nullptr) {
+      driver->notifyResetComplete();
+    }
+  }
+
+  mStarted = false;
+  mPrepared = false;
+  mResetting = false;
+  mSourceStarted = false;
+
+  // Modular DRM
+  if (mCrypto != nullptr) {
+    // decoders will be flushed before this so their mCrypto would go away on their own
+    // TODO change to ALOGV
+    ALOGD("performReset mCrypto: %p (%d)", mCrypto.get(),
+          (mCrypto != nullptr ? mCrypto->getStrongCount() : 0));
+    mCrypto.clear();
+  }
+  mIsDrmProtected = false;
+}
+
+void HpcPlayerInternal::performScanSources() {
+  ALOGV("performScanSources");
+
+  if (!mStarted) {
+    return;
+  }
+
+  if (mAudioDecoder == nullptr || mVideoDecoder == nullptr) {
+    postScanSources();
+  }
+}
+
+void HpcPlayerInternal::performSetSurface(const std::shared_ptr<Surface> &surface) {
+  ALOGV("performSetSurface");
+
+  mSurface = surface;
+
+
+  native_window_set_scaling_mode();
+  // XXX - ignore error from setVideoScalingMode for now
+  setVideoScalingMode(mVideoScalingMode);
+
+  if (mDriver != nullptr) {
+    std::shared_ptr<HpcPlayerDriver> driver = mDriver.promote();
+    if (driver != nullptr) {
+      driver->notifySetSurfaceComplete();
+    }
+  }
+}
+
+void HpcPlayerInternal::performResumeDecoders(bool needNotify) {
+  if (needNotify) {
+    mResumePending = true;
+    if (mVideoDecoder == nullptr) {
+      // if audio-only, we can notify seek complete now,
+      // as the resume operation will be relatively fast.
+      finishResume();
+    }
+  }
+
+  if (mVideoDecoder != nullptr) {
+    // When there is continuous seek, MediaPlayer will cache the seek
+    // position, and send down new seek request when previous seek is
+    // complete. Let's wait for at least one video output frame before
+    // notifying seek complete, so that the video thumbnail gets updated
+    // when seekbar is dragged.
+    mVideoDecoder->signalResume(needNotify);
+  }
+
+  if (mAudioDecoder != nullptr) {
+    mAudioDecoder->signalResume(false /* needNotify */);
+  }
+}
+
+void HpcPlayerInternal::finishResume() {
+  if (mResumePending) {
+    mResumePending = false;
+    notifyDriverSeekComplete();
+  }
+}
+
+void HpcPlayerInternal::notifyDriverSeekComplete() {
+  if (mDriver != nullptr) {
+    std::shared_ptr<HpcPlayerDriver> driver = mDriver.promote();
+    if (driver != nullptr) {
+      driver->notifySeekComplete();
+    }
+  }
 }
 
 void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
@@ -32,14 +381,14 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
     {
       ALOGV("kWhatSetDataSource");
 
-      if (mSource == NULL) {
+      if (mSource == nullptr) {
         ALOGE("source is null");
         break;
       }
 
       status_t err = OK;
       void *obj;
-      if(!(msg->findObject(&obj))) {
+      if(!msg->findObject("source",&obj)) {
         err = UNKNOWN_ERROR;
       } else {
         std::lock_guard autoLock(mSourceLock);
@@ -83,33 +432,36 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
     case kWhatSetVideoSurface:
     {
 
-      sp<RefBase> obj;
-      CHECK(msg->findObject("surface", &obj));
-      sp<Surface> surface = static_cast<Surface *>(obj.get());
+      void* obj;
+      if(!msg->findObject("surface", &obj)) {
+        break;
+      }
+
+      std::shared_ptr<Surface> surface((Surface*)obj);
 
       ALOGD("onSetVideoSurface(%p, %s video decoder)",
             surface.get(),
-            (mSource != NULL && mStarted && mSource->getFormat(false /* audio */) != NULL
-                && mVideoDecoder != NULL) ? "have" : "no");
+            (mSource != nullptr && mStarted && mSource->getFormat(false /* audio */) != nullptr
+                && mVideoDecoder != nullptr) ? "have" : "no");
 
-      // Need to check mStarted before calling mSource->getFormat because NuPlayer might
+      // Need to check mStarted before calling mSource->getFormat because HpcPlayerInternal might
       // be in preparing state and it could take long time.
       // When mStarted is true, mSource must have been set.
-      if (mSource == NULL || !mStarted || mSource->getFormat(false /* audio */) == NULL
+      if (mSource == nullptr || !mStarted || mSource->getFormat(false /* audio */) == nullptr
           // NOTE: mVideoDecoder's mSurface is always non-null
-          || (mVideoDecoder != NULL && mVideoDecoder->setVideoSurface(surface) == OK)) {
+          || (mVideoDecoder != nullptr && mVideoDecoder->setVideoSurface(surface) == OK)) {
         performSetSurface(surface);
         break;
       }
 
       mDeferredActions.push_back(
-          new FlushDecoderAction(
-              (obj != NULL ? FLUSH_CMD_FLUSH : FLUSH_CMD_NONE) /* audio */,
+          std::make_shared<FlushDecoderAction>(
+              (obj != nullptr ? FLUSH_CMD_FLUSH : FLUSH_CMD_NONE) /* audio */,
               FLUSH_CMD_SHUTDOWN /* video */));
 
-      mDeferredActions.push_back(new SetSurfaceAction(surface));
+      mDeferredActions.push_back(std::make_shared<SetSurfaceAction>(surface));
 
-      if (obj != NULL) {
+      if (obj != nullptr) {
         if (mStarted) {
           // Issue a seek to refresh the video screen only if started otherwise
           // the extractor may not yet be started and will assert.
@@ -118,35 +470,24 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
           int64_t currentPositionUs = 0;
           if (getCurrentPosition(&currentPositionUs) == OK) {
             mDeferredActions.push_back(
-                new SeekAction(currentPositionUs,
-                               MediaPlayerSeekMode::SEEK_PREVIOUS_SYNC /* mode */));
+                std::make_shared<SeekAction>(currentPositionUs,
+                               SeekMode::SEEK_PREVIOUS_SYNC /* mode */));
           }
         }
 
         // If there is a new surface texture, instantiate decoders
         // again if possible.
         mDeferredActions.push_back(
-            new SimpleAction(&NuPlayer::performScanSources));
+            std::make_shared<SimpleAction>(&HpcPlayerInternal::performScanSources));
 
         // After a flush without shutdown, decoder is paused.
         // Don't resume it until source seek is done, otherwise it could
         // start pulling stale data too soon.
         mDeferredActions.push_back(
-            new ResumeDecoderAction(false /* needNotify */));
+            std::make_shared<ResumeDecoderAction>(false /* needNotify */));
       }
 
       processDeferredActions();
-      break;
-    }
-
-    case kWhatSetAudioSink:
-    {
-      ALOGV("kWhatSetAudioSink");
-
-      sp<RefBase> obj;
-      CHECK(msg->findObject("sink", &obj));
-
-      mAudioSink = static_cast<MediaPlayerBase::AudioSink *>(obj.get());
       break;
     }
 
@@ -167,37 +508,15 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
 
     case kWhatConfigPlayback:
     {
-      sp<AReplyToken> replyID;
-      CHECK(msg->senderAwaitsResponse(&replyID));
-      AudioPlaybackRate rate /* sanitized */;
-      readFromAMessage(msg, &rate);
+      std::shared_ptr<AReplyToken> replyID;
+      if(msg->senderAwaitsResponse(&replyID)) {
+        ALOGE("kWhatConfigPlayback: senderAwaitsResponse is false");
+        break;
+      }
+      float rate /* sanitized */;
+       (msg, &rate);
       status_t err = OK;
-      if (mRenderer != NULL) {
-        // AudioSink allows only 1.f and 0.f for offload and direct modes.
-        // For other speeds, restart audio to fallback to supported paths
-        bool audioDirectOutput = (mAudioSink->getFlags() & AUDIO_OUTPUT_FLAG_DIRECT) != 0;
-        if ((mOffloadAudio || audioDirectOutput) &&
-            ((rate.mSpeed != 0.f && rate.mSpeed != 1.f) || rate.mPitch != 1.f)) {
-
-          int64_t currentPositionUs;
-          if (getCurrentPosition(&currentPositionUs) != OK) {
-            currentPositionUs = mPreviousSeekTimeUs;
-          }
-
-          // Set mPlaybackSettings so that the new audio decoder can
-          // be created correctly.
-          mPlaybackSettings = rate;
-          if (!mPaused) {
-            mRenderer->pause();
-          }
-          restartAudio(
-              currentPositionUs, true /* forceNonOffload */,
-              true /* needsToCreateAudioDecoder */);
-          if (!mPaused) {
-            mRenderer->resume();
-          }
-        }
-
+      if (mRenderer != nullptr) {
         err = mRenderer->setPlaybackSettings(rate);
       }
       if (err == OK) {
@@ -207,10 +526,10 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
           // save all other settings (using non-paused speed)
           // so we can restore them on start
           AudioPlaybackRate newRate = rate;
-          newRate.mSpeed = mPlaybackSettings.mSpeed;
-          mPlaybackSettings = newRate;
+          newRate.mSpeed = mPlaybackRate.mSpeed;
+          mPlaybackRate = newRate;
         } else { /* rate.mSpeed != 0.f */
-          mPlaybackSettings = rate;
+          mPlaybackRate = rate;
           if (mStarted) {
             // do not resume yet if the source is still buffering
             if (!mPausedForBuffering) {
@@ -224,13 +543,13 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
         }
       }
 
-      if (mVideoDecoder != NULL) {
-        sp<AMessage> params = new AMessage();
-        params->setFloat("playback-speed", mPlaybackSettings.mSpeed);
+      if (mVideoDecoder != nullptr) {
+        std::shared_ptr<Message> params = new Message();
+        params->setFloat("playback-speed", mPlaybackRate.mSpeed);
         mVideoDecoder->setParameters(params);
       }
 
-      sp<AMessage> response = new AMessage;
+      std::shared_ptr<Message> response = new Message;
       response->setInt32("err", err);
       response->postReply(replyID);
       break;
@@ -238,24 +557,24 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
 
     case kWhatGetPlaybackSettings:
     {
-      sp<AReplyToken> replyID;
+      std::shared_ptr<AReplyToken> replyID;
       CHECK(msg->senderAwaitsResponse(&replyID));
-      AudioPlaybackRate rate = mPlaybackSettings;
+      float rate = mPlaybackRate;
       status_t err = OK;
-      if (mRenderer != NULL) {
+      if (mRenderer != nullptr) {
         err = mRenderer->getPlaybackSettings(&rate);
       }
       if (err == OK) {
         // get playback settings used by renderer, as it may be
         // slightly off due to audiosink not taking small changes.
-        mPlaybackSettings = rate;
+        mPlaybackRate = rate;
         if (mPaused) {
           rate.mSpeed = 0.f;
         }
       }
-      sp<AMessage> response = new AMessage;
+      std::shared_ptr<Message> response = new Message;
       if (err == OK) {
-        writeToAMessage(response, rate);
+        writeToMessage(response, rate);
       }
       response->setInt32("err", err);
       response->postReply(replyID);
@@ -264,22 +583,22 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
 
     case kWhatConfigSync:
     {
-      sp<AReplyToken> replyID;
+      std::shared_ptr<AReplyToken> replyID;
       CHECK(msg->senderAwaitsResponse(&replyID));
 
       ALOGV("kWhatConfigSync");
       AVSyncSettings sync;
       float videoFpsHint;
-      readFromAMessage(msg, &sync, &videoFpsHint);
+      readFromMessage(msg, &sync, &videoFpsHint);
       status_t err = OK;
-      if (mRenderer != NULL) {
+      if (mRenderer != nullptr) {
         err = mRenderer->setSyncSettings(sync, videoFpsHint);
       }
       if (err == OK) {
         mSyncSettings = sync;
         mVideoFpsHint = videoFpsHint;
       }
-      sp<AMessage> response = new AMessage;
+      std::shared_ptr<Message> response = new Message;
       response->setInt32("err", err);
       response->postReply(replyID);
       break;
@@ -287,21 +606,21 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
 
     case kWhatGetSyncSettings:
     {
-      sp<AReplyToken> replyID;
+      std::shared_ptr<AReplyToken> replyID;
       CHECK(msg->senderAwaitsResponse(&replyID));
       AVSyncSettings sync = mSyncSettings;
       float videoFps = mVideoFpsHint;
       status_t err = OK;
-      if (mRenderer != NULL) {
+      if (mRenderer != nullptr) {
         err = mRenderer->getSyncSettings(&sync, &videoFps);
         if (err == OK) {
           mSyncSettings = sync;
           mVideoFpsHint = videoFps;
         }
       }
-      sp<AMessage> response = new AMessage;
+      std::shared_ptr<Message> response = new Message;
       if (err == OK) {
-        writeToAMessage(response, sync, videoFps);
+        writeToMessage(response, sync, videoFps);
       }
       response->setInt32("err", err);
       response->postReply(replyID);
@@ -320,29 +639,29 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
       mScanSourcesPending = false;
 
       ALOGV("scanning sources haveAudio=%d, haveVideo=%d",
-            mAudioDecoder != NULL, mVideoDecoder != NULL);
+            mAudioDecoder != nullptr, mVideoDecoder != nullptr);
 
       bool mHadAnySourcesBefore =
-          (mAudioDecoder != NULL) || (mVideoDecoder != NULL);
+          (mAudioDecoder != nullptr) || (mVideoDecoder != nullptr);
       bool rescan = false;
 
       // initialize video before audio because successful initialization of
       // video may change deep buffer mode of audio.
-      if (mSurface != NULL) {
+      if (mSurface != nullptr) {
         if (instantiateDecoder(false, &mVideoDecoder) == -EWOULDBLOCK) {
           rescan = true;
         }
       }
 
       // Don't try to re-open audio sink if there's an existing decoder.
-      if (mAudioSink != NULL && mAudioDecoder == NULL) {
+      if (mAudioSink != nullptr && mAudioDecoder == nullptr) {
         if (instantiateDecoder(true, &mAudioDecoder) == -EWOULDBLOCK) {
           rescan = true;
         }
       }
 
       if (!mHadAnySourcesBefore
-          && (mAudioDecoder != NULL || mVideoDecoder != NULL)) {
+          && (mAudioDecoder != nullptr || mVideoDecoder != nullptr)) {
         // This is the first time we've found anything playable.
 
         if (mSourceFlags & Source::FLAG_DYNAMIC_DURATION) {
@@ -352,7 +671,7 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
 
       status_t err;
       if ((err = mSource->feedMoreTSData()) != OK) {
-        if (mAudioDecoder == NULL && mVideoDecoder == NULL) {
+        if (mAudioDecoder == nullptr && mVideoDecoder == nullptr) {
           // We're not currently decoding anything (no audio or
           // video tracks found) and we just ran out of input data.
 
@@ -386,7 +705,7 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
         ALOGV("got message from old %s decoder, generation(%d:%d)",
               audio ? "audio" : "video", requesterGeneration,
               currentDecoderGeneration);
-        sp<AMessage> reply;
+        std::shared_ptr<Message> reply;
         if (!(msg->findMessage("reply", &reply))) {
           return;
         }
@@ -415,7 +734,7 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
 
         mDeferredActions.push_back(
             new SimpleAction(
-                &NuPlayer::performScanSources));
+                &HpcPlayerInternal::performScanSources));
 
         processDeferredActions();
       } else if (what == DecoderBase::kWhatEOS) {
@@ -437,10 +756,10 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
         handleFlushComplete(audio, true /* isDecoder */);
         finishFlushIfPossible();
       } else if (what == DecoderBase::kWhatVideoSizeChanged) {
-        sp<AMessage> format;
+        std::shared_ptr<Message> format;
         CHECK(msg->findMessage("format", &format));
 
-        sp<AMessage> inputFormat =
+        std::shared_ptr<Message> inputFormat =
             mSource->getFormat(false /* audio */);
 
         setVideoScalingMode(mVideoScalingMode);
@@ -448,7 +767,7 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
       } else if (what == DecoderBase::kWhatShutdownCompleted) {
         ALOGV("%s shutdown completed", audio ? "audio" : "video");
         if (audio) {
-          Mutex::Autolock autoLock(mDecoderLock);
+          std::lock_guard<std::mutex> autoLock(mDecoderLock);
           mAudioDecoder.clear();
           mAudioDecoderError = false;
           ++mAudioDecoderGeneration;
@@ -456,7 +775,7 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
           CHECK_EQ((int)mFlushingAudio, (int)SHUTTING_DOWN_DECODER);
           mFlushingAudio = SHUT_DOWN;
         } else {
-          Mutex::Autolock autoLock(mDecoderLock);
+          std::lock_guard<std::mutex> autoLock(mDecoderLock);
           mVideoDecoder.clear();
           mVideoDecoderError = false;
           ++mVideoDecoderGeneration;
@@ -515,8 +834,8 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
         }
         if (mSource != nullptr) {
           if (audio) {
-            if (mVideoDecoderError || mSource->getFormat(false /* audio */) == NULL
-                || mSurface == NULL || mVideoDecoder == NULL) {
+            if (mVideoDecoderError || mSource->getFormat(false /* audio */) == nullptr
+                || mSurface == nullptr || mVideoDecoder == nullptr) {
               // When both audio and video have error, or this stream has only audio
               // which has error, notify client of error.
               notifyListener(MEDIA_ERROR, MEDIA_ERROR_UNKNOWN, err);
@@ -530,8 +849,8 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
             }
             mAudioDecoderError = true;
           } else {
-            if (mAudioDecoderError || mSource->getFormat(true /* audio */) == NULL
-                || mAudioSink == NULL || mAudioDecoder == NULL) {
+            if (mAudioDecoderError || mSource->getFormat(true /* audio */) == nullptr
+                || mAudioSink == nullptr || mAudioDecoder == nullptr) {
               // When both audio and video have error, or this stream has only video
               // which has error, notify client of error.
               notifyListener(MEDIA_ERROR, MEDIA_ERROR_UNKNOWN, err);
@@ -594,8 +913,8 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
               MEDIA_ERROR, MEDIA_ERROR_UNKNOWN, finalResult);
         }
 
-        if ((mAudioEOS || mAudioDecoder == NULL)
-            && (mVideoEOS || mVideoDecoder == NULL)) {
+        if ((mAudioEOS || mAudioDecoder == nullptr)
+            && (mVideoEOS || mVideoDecoder == nullptr)) {
           notifyListener(MEDIA_PLAYBACK_COMPLETE, 0, 0);
         }
       } else if (what == Renderer::kWhatFlushComplete) {
@@ -662,7 +981,7 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
               FLUSH_CMD_SHUTDOWN /* video */));
 
       mDeferredActions.push_back(
-          new SimpleAction(&NuPlayer::performReset));
+          new SimpleAction(&HpcPlayerInternal::performReset));
 
       processDeferredActions();
       break;
@@ -743,30 +1062,6 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
       break;
     }
 
-    case kWhatPrepareDrm:
-    {
-      status_t status = onPrepareDrm(msg);
-
-      sp<AMessage> response = new AMessage;
-      response->setInt32("status", status);
-      sp<AReplyToken> replyID;
-      CHECK(msg->senderAwaitsResponse(&replyID));
-      response->postReply(replyID);
-      break;
-    }
-
-    case kWhatReleaseDrm:
-    {
-      status_t status = onReleaseDrm();
-
-      sp<AMessage> response = new AMessage;
-      response->setInt32("status", status);
-      sp<AReplyToken> replyID;
-      CHECK(msg->senderAwaitsResponse(&replyID));
-      response->postReply(replyID);
-      break;
-    }
-
     case kWhatMediaClockNotify:
     {
       ALOGV("kWhatMediaClockNotify");
@@ -791,6 +1086,128 @@ void HpcPlayerInternal::onMessageReceived(const std::shared_ptr<Message> &msg) {
 
 status_t HpcPlayerInternal::prepareAsync() {
   return 0;
+}
+
+void HpcPlayerInternal::start() {
+
+}
+void HpcPlayerInternal::pause() {
+
+}
+void HpcPlayerInternal::init(const std::weak_ptr<HpcPlayer> &driver) {
+
+}
+void HpcPlayerInternal::updateVideoSize(const std::shared_ptr<Message> &inputFormat,
+                                        const std::shared_ptr<Message> &outputFormat) {
+
+}
+void HpcPlayerInternal::onStart(int64_t startPositionUs, SeekMode mode) {
+
+}
+
+void HpcPlayerInternal::startPlaybackTimer(const char *where) {
+  std::lock_guard<std::mutex> autoLock(mPlayingTimeLock);
+  if (mLastStartedPlayingTimeNs == 0) {
+    mLastStartedPlayingTimeNs = systemTime();
+    ALOGV("startPlaybackTimer() time %20" PRId64 " (%s)",  mLastStartedPlayingTimeNs, where);
+  }
+}
+
+void HpcPlayerInternal::updatePlaybackTimer(bool stopping, const char *where) {
+  std::lock_guard<std::mutex> autoLock(mPlayingTimeLock);
+
+  ALOGV("updatePlaybackTimer(%s)  time %20" PRId64 " (%s)",
+        stopping ? "stop" : "snap", mLastStartedPlayingTimeNs, where);
+
+  if (mLastStartedPlayingTimeNs != 0) {
+    sp<NuPlayerDriver> driver = mDriver.promote();
+    int64_t now = systemTime();
+    if (driver != NULL) {
+      int64_t played = now - mLastStartedPlayingTimeNs;
+      ALOGV("updatePlaybackTimer()  log  %20" PRId64 "", played);
+
+      if (played > 0) {
+        driver->notifyMorePlayingTimeUs((played+500)/1000);
+      }
+    }
+    if (stopping) {
+      mLastStartedPlayingTimeNs = 0;
+    } else {
+      mLastStartedPlayingTimeNs = now;
+    }
+  }
+}
+
+void HpcPlayerInternal::startRebufferingTimer() {
+  std::lock_guard<std::mutex> autoLock(mPlayingTimeLock);
+  if (mLastStartedRebufferingTimeNs == 0) {
+    mLastStartedRebufferingTimeNs = systemTime();
+    ALOGV("startRebufferingTimer() time %20" PRId64 "",  mLastStartedRebufferingTimeNs);
+  }
+}
+
+void HpcPlayerInternal::updateRebufferingTimer(bool stopping, bool exitingPlayback) {
+  std::lock_guard<std::mutex> autoLock(mPlayingTimeLock);
+
+  ALOGV("updateRebufferingTimer(%s)  time %20" PRId64 " (exiting %d)",
+        stopping ? "stop" : "snap", mLastStartedRebufferingTimeNs, exitingPlayback);
+
+  if (mLastStartedRebufferingTimeNs != 0) {
+    sp<HpcPlayer> driver = mDriver.promote();
+    int64_t now = systemTime();
+    if (driver != NULL) {
+      int64_t rebuffered = now - mLastStartedRebufferingTimeNs;
+      ALOGV("updateRebufferingTimer()  log  %20" PRId64 "", rebuffered);
+
+      if (rebuffered > 0) {
+        driver->notifyMoreRebufferingTimeUs((rebuffered+500)/1000);
+        if (exitingPlayback) {
+          driver->notifyRebufferingWhenExit(true);
+        }
+      }
+    }
+    if (stopping) {
+      mLastStartedRebufferingTimeNs = 0;
+    } else {
+      mLastStartedRebufferingTimeNs = now;
+    }
+  }
+}
+
+void HpcPlayerInternal::updateInternalTimers() {
+  // update values, but ticking clocks keep ticking
+  ALOGV("updateInternalTimers()");
+  updatePlaybackTimer(false /* stopping */, "updateInternalTimers");
+  updateRebufferingTimer(false /* stopping */, false /* exiting */);
+}
+
+void HpcPlayerInternal::seekTo(int64_t seekTimeUs) {
+
+}
+status_t HpcPlayerInternal::setVideoScalingMode(int32_t mode) {
+  return 0;
+}
+void HpcPlayerInternal::resetAsync() {
+
+}
+
+status_t HpcPlayerInternal::notifyAt(int64_t mediaTimeUs) {
+  std::shared_ptr<Message> notify = std::make_shared<Message>(kWhatNotifyTime, shared_from_this());
+  notify->setInt(mediaTimeUs);
+  mMediaClock->addTimer(notify, mediaTimeUs);
+  return OK;
+}
+
+void HpcPlayerInternal::postScanSources() {
+  if (mScanSourcesPending) {
+    return;
+  }
+
+  std::shared_ptr<Message> msg = std::make_shared<Message>(kWhatScanSources, shared_from_this());
+  msg->setInt(mScanSourcesGeneration);
+  msg->post();
+
+  mScanSourcesPending = true;
 }
 
 }
