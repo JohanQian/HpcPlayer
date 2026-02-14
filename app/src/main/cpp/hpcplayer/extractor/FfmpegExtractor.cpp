@@ -277,12 +277,10 @@ void FfmpegExtractor::doReadBuffer() {
             return;
         }
         ret = av_read_frame(format_context_, packet);
-        LOG_E("qjtest av_read_frame");
     }
 
     if (ret >= 0) {
         if (packet->stream_index == video_stream_index_) {
-            LOG_E("qjtest video_stream_index_");
             if (bsf_context_) {
                 av_bsf_send_packet(bsf_context_, packet);
                 while (av_bsf_receive_packet(bsf_context_, packet) == 0) {
@@ -301,7 +299,6 @@ void FfmpegExtractor::doReadBuffer() {
                 video_packet_queue_.Push(sample);
             }
         } else if (packet->stream_index == audio_stream_index_) {
-            LOG_E("qjtest audio_stream_index_");
             auto sample = std::make_shared<MediaSample>();
             sample->data.resize(packet->size);
             memcpy(sample->data.data(), packet->data, packet->size);
@@ -310,9 +307,7 @@ void FfmpegExtractor::doReadBuffer() {
                 sample->is_seek_frame = true;
                 is_seek_ = false;
             }
-            LOG_E("qjtest audio_stream_index_2222 %d",audio_packet_queue_.Size());
             audio_packet_queue_.Push(sample);
-            LOG_E("qjtest audio_stream_index_11111");
         }
         av_packet_unref(packet);
         postReadBuffer(); 
