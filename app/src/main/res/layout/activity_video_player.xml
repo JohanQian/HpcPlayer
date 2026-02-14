@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <SurfaceView
+        android:id="@+id/surfaceView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_centerInParent="true" />
+
+    <!-- Control Panel Overlay -->
+    <RelativeLayout
+        android:id="@+id/controlPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#40000000"
+        android:visibility="visible">
+
+        <!-- Top Bar -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_alignParentTop="true"
+            android:orientation="horizontal"
+            android:padding="16dp"
+            android:background="#80000000">
+            
+            <TextView
+                android:id="@+id/videoTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Video Title"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp"
+                android:textStyle="bold"/>
+        </LinearLayout>
+
+        <!-- Center Play/Pause Button -->
+        <ImageButton
+            android:id="@+id/centerPlayButton"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:layout_centerInParent="true"
+            android:background="@android:color/transparent"
+            android:src="@android:drawable/ic_media_play"
+            android:scaleType="fitCenter"
+            android:tint="#FFFFFF"/>
+
+        <!-- Bottom Controls -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_alignParentBottom="true"
+            android:orientation="vertical"
+            android:background="#80000000"
+            android:padding="8dp">
+
+            <!-- Seek Bar and Time -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/currentTime"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="00:00"
+                    android:textColor="#FFFFFF"
+                    android:textSize="12sp"
+                    android:paddingEnd="8dp"/>
+
+                <SeekBar
+                    android:id="@+id/seekBar"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:max="100"
+                    android:progress="0"/>
+
+                <TextView
+                    android:id="@+id/totalTime"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="00:00"
+                    android:textColor="#FFFFFF"
+                    android:textSize="12sp"
+                    android:paddingStart="8dp"/>
+            </LinearLayout>
+
+            <!-- Control Buttons -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center"
+                android:paddingTop="8dp">
+
+                <ImageButton
+                    android:id="@+id/prevButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="@android:color/transparent"
+                    android:src="@android:drawable/ic_media_previous"
+                    android:tint="#FFFFFF"
+                    android:layout_marginEnd="32dp"/>
+
+                <ImageButton
+                    android:id="@+id/playPauseButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="@android:color/transparent"
+                    android:src="@android:drawable/ic_media_play"
+                    android:tint="#FFFFFF"/>
+
+                <ImageButton
+                    android:id="@+id/nextButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="@android:color/transparent"
+                    android:src="@android:drawable/ic_media_next"
+                    android:tint="#FFFFFF"
+                    android:layout_marginStart="32dp"/>
+
+            </LinearLayout>
+        </LinearLayout>
+    </RelativeLayout>
+
+</RelativeLayout>
