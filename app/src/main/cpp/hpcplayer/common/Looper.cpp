@@ -16,18 +16,31 @@ void Looper::start() {
     if (running_.exchange(true)) {
         return;
     }
-    thread_ = std::thread(&Looper::run, this);
+    // Capture shared_from_this to keep the Looper alive until the thread finishes.
+    // This prevents the Looper from being destroyed while the thread is still running,
+    // which is crucial if the Looper is stopped from within its own thread.
+    auto self = shared_from_this();
+    thread_ = std::thread([this, self]() {
+        this->run();
+    });
 }
 
 void Looper::stop() {
-    if (!running_.exchange(false)) {
-        return;
-    }
-
+    running_.store(false);
     cv_.notify_one();
+
     if (thread_.joinable()) {
-        thread_.join();
+        if (thread_.get_id() == std::this_thread::get_id()) {
+            thread_.detach();
+        } else {
+            thread_.join();
+        }
     }
+}
+
+void Looper::quit() {
+    running_.store(false);
+    cv_.notify_one();
 }
 
 void Looper::post(std::function<void()> task) {

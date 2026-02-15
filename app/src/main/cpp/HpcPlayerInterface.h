@@ -5,9 +5,6 @@
 #include <mutex>
 #include <android/native_window.h>
 
-// Define status_t
-using status_t = int32_t;
-
 enum media_event_type {
     MEDIA_NOP               = 0, // interface test message
     MEDIA_PREPARED          = 1,
@@ -29,8 +26,8 @@ public:
 
 class HpcPlayerInterface {
 public:
-    HpcPlayerInterface();
-    virtual ~HpcPlayerInterface();
+    HpcPlayerInterface() = default;
+    virtual ~HpcPlayerInterface() = default;
 
     virtual void setDataSource(const char* path) = 0;
     virtual void setSurface(std::shared_ptr<ANativeWindow> window) = 0;
@@ -43,7 +40,7 @@ public:
     virtual int64_t getDuration() = 0;
     virtual int64_t getCurrentPosition() = 0;
 
-    virtual status_t setListener(const std::shared_ptr<HpcPlayerListener>& listener);
+    virtual void setListener(const std::shared_ptr<HpcPlayerListener>& listener);
     void notify(int msg, int ext1, int ext2, const void *obj = nullptr);
 
 protected:

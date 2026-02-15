@@ -19,6 +19,7 @@
 
 struct ANativeWindow;
 class MediaClock;
+class HpcPlayer;
 
 struct PlayerConfig {
     bool useHardwareDecoding = true;
@@ -27,7 +28,7 @@ struct PlayerConfig {
 
 class HpcCore : public Handler {
 public:
-    static std::shared_ptr<HpcCore> create();
+    static std::shared_ptr<HpcCore> create(std::weak_ptr<HpcPlayer> player);
     ~HpcCore();
 
     void setMessageCallback(std::function<void(const Message&)> callback);
@@ -45,12 +46,6 @@ public:
     int64_t getCurrentPosition();
     int64_t getDuration();
 
-private:
-    explicit HpcCore(std::shared_ptr<Looper> looper);
-    void init();
-
-    void onMessageReceived(const Message& msg) override;
-
     enum {
         kWhatPrepare            = 'prep',
         kWhatStart              = 'strt',
@@ -60,8 +55,17 @@ private:
         kWhatSeek               = 'seek',
         kWhatSetVideoSurface    = '=VSu',
         kWhatMediaClockNotify   = 'mckN',
+        kWhatSourceNotify       = 'srcN',
     };
 
+private:
+    explicit HpcCore(std::weak_ptr<HpcPlayer> player,std::shared_ptr<Looper> looper);
+    void init();
+    void initDecoder();
+
+    void onMessageReceived(const Message& msg) override;
+
+    void onSourceNotify(const Message& msg);
     void notifyListener(const Message& msg);
 
     void doPrepare();
@@ -74,6 +78,8 @@ private:
 
     PlayerConfig config;
     std::shared_ptr<Looper> looper;
+    std::shared_ptr<Looper> videoLooper;
+    std::shared_ptr<Looper> audioLooper;
 
     std::shared_ptr<Extractor> extractor;
     std::shared_ptr<Decoder> videoDecoder;
@@ -92,6 +98,8 @@ private:
 
     std::atomic_bool isRunning{false};
     std::atomic_bool isPlaying{false};
+    
+    std::weak_ptr<HpcPlayer> player;
 };
 
 #endif // HPC_PLAYER_HPC_CORE_H_

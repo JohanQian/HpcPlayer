@@ -16,9 +16,9 @@
 // Forward-declare ANativeWindow
 struct ANativeWindow;
 
-class HpcPlayer final : public HpcPlayerInterface {
+class HpcPlayer final : public HpcPlayerInterface, public std::enable_shared_from_this<HpcPlayer> {
 public:
-    HpcPlayer();
+    static std::shared_ptr<HpcPlayer> create();
     ~HpcPlayer() override;
 
     void setDataSource(const char* path) override;
@@ -45,6 +45,9 @@ public:
     void notifyPlaybackComplete();
 
 private:
+    HpcPlayer();
+    void init();
+
     void onMessage(const Message& msg);
     void notifyListenerL(int msg, int ext1 = 0, int ext2 = 0);
 

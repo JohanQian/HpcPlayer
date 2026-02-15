@@ -25,10 +25,10 @@ private:
     void doFlush();
     void doRequestInputBuffers();
 
-    AVCodecContext* codec_context_ = nullptr;
-    AVFrame* av_frame_ = nullptr;
-    SwsContext* sws_context_ = nullptr;
-    int target_width_ = 0;
-    int target_height_ = 0;
-    AVPixelFormat target_pixel_format_ = AV_PIX_FMT_RGBA;
+    AVCodecContext* codecContext = nullptr;
+    AVFrame* avFrame = nullptr;
+    SwsContext* swsContext = nullptr;
+    int targetWidth = 0;
+    int targetHeight = 0;
+    AVPixelFormat targetPixelFormat = AV_PIX_FMT_RGBA;
 };

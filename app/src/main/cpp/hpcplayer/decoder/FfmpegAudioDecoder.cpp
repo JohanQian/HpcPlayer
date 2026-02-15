@@ -53,32 +53,32 @@ void FfmpegAudioDecoder::doConfigure(const std::shared_ptr<MediaFormat>& format)
          return;
     }
 
-    codec_context_ = avcodec_alloc_context3(codec);
-    if (!codec_context_) {
+    codecContext = avcodec_alloc_context3(codec);
+    if (!codecContext) {
         LOG_E("Failed to allocate AVCodecContext");
         return;
     }
     
-    codec_context_->channels = format->channels;
-    codec_context_->sample_rate = format->sample_rate;
+    codecContext->channels = format->channels;
+    codecContext->sample_rate = format->sample_rate;
     if (!format->extradata.empty()) {
-        codec_context_->extradata = static_cast<uint8_t*>(av_malloc(format->extradata.size() + AV_INPUT_BUFFER_PADDING_SIZE));
-        memcpy(codec_context_->extradata, format->extradata.data(), format->extradata.size());
-        codec_context_->extradata_size = format->extradata.size();
+        codecContext->extradata = static_cast<uint8_t*>(av_malloc(format->extradata.size() + AV_INPUT_BUFFER_PADDING_SIZE));
+        memcpy(codecContext->extradata, format->extradata.data(), format->extradata.size());
+        codecContext->extradata_size = format->extradata.size();
     }
 
-    if (avcodec_open2(codec_context_, codec, nullptr) < 0) {
+    if (avcodec_open2(codecContext, codec, nullptr) < 0) {
         LOG_E("Failed to open audio codec");
         doStop();
         return;
     }
 
-    av_frame_ = av_frame_alloc();
-    swr_context_ = swr_alloc_set_opts(nullptr,
-                                      target_channel_layout_, target_sample_fmt_, target_sample_rate_,
-                                      av_get_default_channel_layout(codec_context_->channels),
-                                      codec_context_->sample_fmt, codec_context_->sample_rate, 0, nullptr);
-    swr_init(swr_context_);
+    avFrame = av_frame_alloc();
+    swrContext = swr_alloc_set_opts(nullptr,
+                                      targetChannelLayout, targetSampleFmt, targetSampleRate,
+                                      av_get_default_channel_layout(codecContext->channels),
+                                      codecContext->sample_fmt, codecContext->sample_rate, 0, nullptr);
+    swr_init(swrContext);
 }
 
 void FfmpegAudioDecoder::doSetRenderer(const std::shared_ptr<Renderer>& renderer) {
@@ -94,28 +94,28 @@ void FfmpegAudioDecoder::doStart() {
 }
 
 void FfmpegAudioDecoder::doStop() {
-    if (swr_context_) {
-        swr_free(&swr_context_);
-        swr_context_ = nullptr;
+    if (swrContext) {
+        swr_free(&swrContext);
+        swrContext = nullptr;
     }
-    if (av_frame_) {
-        av_frame_free(&av_frame_);
-        av_frame_ = nullptr;
+    if (avFrame) {
+        av_frame_free(&avFrame);
+        avFrame = nullptr;
     }
-    if (codec_context_) {
-        if (codec_context_->extradata) {
-            av_freep(&codec_context_->extradata);
+    if (codecContext) {
+        if (codecContext->extradata) {
+            av_freep(&codecContext->extradata);
         }
-        avcodec_free_context(&codec_context_);
-        codec_context_ = nullptr;
+        avcodec_free_context(&codecContext);
+        codecContext = nullptr;
     }
 }
 
 void FfmpegAudioDecoder::doFlush() {
-    if (codec_context_) {
-        avcodec_flush_buffers(codec_context_);
+    if (codecContext) {
+        avcodec_flush_buffers(codecContext);
     }
-    frame_queue_.Flush();
+    frameQueue.flush();
 }
 
 void FfmpegAudioDecoder::doRequestInputBuffers() {
@@ -131,14 +131,19 @@ void FfmpegAudioDecoder::doRequestInputBuffers() {
 
     int ret = 0;
     if (sample->is_eos) {
-        ret = avcodec_send_packet(codec_context_, nullptr);
+        // Send flush packet
+        AVPacket packet;
+        av_init_packet(&packet);
+        packet.data = nullptr;
+        packet.size = 0;
+        ret = avcodec_send_packet(codecContext, &packet);
     } else {
         AVPacket packet;
         av_init_packet(&packet);
         packet.data = sample->data.data();
         packet.size = static_cast<int>(sample->data.size());
         packet.pts = sample->pts;
-        ret = avcodec_send_packet(codec_context_, &packet);
+        ret = avcodec_send_packet(codecContext, &packet);
     }
 
     if (ret < 0) {
@@ -147,7 +152,7 @@ void FfmpegAudioDecoder::doRequestInputBuffers() {
     }
 
     while (true) {
-        ret = avcodec_receive_frame(codec_context_, av_frame_);
+        ret = avcodec_receive_frame(codecContext, avFrame);
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
             break;
         } else if (ret < 0) {
@@ -155,30 +160,29 @@ void FfmpegAudioDecoder::doRequestInputBuffers() {
             break;
         }
 
-        int dst_nb_samples = av_rescale_rnd(swr_get_delay(swr_context_, codec_context_->sample_rate) +
-                                            av_frame_->nb_samples, target_sample_rate_, codec_context_->sample_rate, AV_ROUND_UP);
+        int dst_nb_samples = av_rescale_rnd(swr_get_delay(swrContext, codecContext->sample_rate) +
+                                            avFrame->nb_samples, targetSampleRate, codecContext->sample_rate, AV_ROUND_UP);
         
         auto audio_frame = std::make_shared<MediaFrame>();
-        audio_frame->pts = av_frame_->pts;
-        audio_frame->sample_rate = target_sample_rate_;
-        audio_frame->channels = av_get_channel_layout_nb_channels(target_channel_layout_);
+        audio_frame->pts = avFrame->pts;
+        audio_frame->sample_rate = targetSampleRate;
+        audio_frame->channels = av_get_channel_layout_nb_channels(targetChannelLayout);
         
-        int buffer_size = av_samples_get_buffer_size(nullptr, audio_frame->channels, dst_nb_samples, target_sample_fmt_, 1);
+        int buffer_size = av_samples_get_buffer_size(nullptr, audio_frame->channels, dst_nb_samples, targetSampleFmt, 1);
         audio_frame->data = std::make_unique<uint8_t[]>(buffer_size);
         
         uint8_t* out_data[1] = { audio_frame->data.get() };
-        int converted_samples = swr_convert(swr_context_, out_data, dst_nb_samples,
-                                            (const uint8_t**)av_frame_->data, av_frame_->nb_samples);
+        int converted_samples = swr_convert(swrContext, out_data, dst_nb_samples,
+                                            (const uint8_t**)avFrame->data, avFrame->nb_samples);
         
         if (converted_samples < 0) {
              LOG_E("Error converting audio");
              continue;
         }
         
-        audio_frame->size = av_samples_get_buffer_size(nullptr, audio_frame->channels, converted_samples, target_sample_fmt_, 1);
+        audio_frame->size = av_samples_get_buffer_size(nullptr, audio_frame->channels, converted_samples, targetSampleFmt, 1);
         audio_frame->is_seek_frame = sample->is_seek_frame;
-        LOG_E("qjtest frame_queue_ %ld ",audio_frame->pts);
-        frame_queue_.Push(audio_frame);
+        frameQueue.push(audio_frame);
     }
 
     if (!sample->is_eos) {

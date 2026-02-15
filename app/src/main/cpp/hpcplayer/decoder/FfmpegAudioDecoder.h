@@ -24,10 +24,10 @@ private:
     void doFlush();
     void doRequestInputBuffers();
 
-    AVCodecContext* codec_context_ = nullptr;
-    AVFrame* av_frame_ = nullptr;
-    SwrContext* swr_context_ = nullptr;
-    int64_t target_channel_layout_ = AV_CH_LAYOUT_STEREO;
-    AVSampleFormat target_sample_fmt_ = AV_SAMPLE_FMT_S16;
-    int target_sample_rate_ = 44100;
+    AVCodecContext* codecContext = nullptr;
+    AVFrame* avFrame = nullptr;
+    SwrContext* swrContext = nullptr;
+    int64_t targetChannelLayout = AV_CH_LAYOUT_STEREO;
+    AVSampleFormat targetSampleFmt = AV_SAMPLE_FMT_S16;
+    int targetSampleRate = 44100;
 };

@@ -3,6 +3,11 @@
 #include "common/MediaFormat.h"
 #include "renderer/Renderer.h"
 #include "common/Message.h"
+#include "common/MediaSample.h"
+
+namespace {
+    constexpr char kTag[] = "FfmpegVideoDecoder";
+}
 
 FfmpegVideoDecoder::FfmpegVideoDecoder(const std::shared_ptr<Looper>& looper) : Decoder(looper) {}
 
@@ -38,24 +43,31 @@ void FfmpegVideoDecoder::onMessageReceived(const Message& msg) {
 
 void FfmpegVideoDecoder::doConfigure(const std::shared_ptr<MediaFormat>& format) {
     const AVCodec* codec = avcodec_find_decoder(static_cast<AVCodecID>(format->codec_id));
-    if (!codec) return;
-
-    codec_context_ = avcodec_alloc_context3(codec);
-    if (!codec_context_) return;
-
-    codec_context_->width = format->width;
-    codec_context_->height = format->height;
-    if (!format->extradata.empty()) {
-        codec_context_->extradata = static_cast<uint8_t*>(av_malloc(format->extradata.size() + AV_INPUT_BUFFER_PADDING_SIZE));
-        memcpy(codec_context_->extradata, format->extradata.data(), format->extradata.size());
-        codec_context_->extradata_size = format->extradata.size();
+    if (!codec) {
+        LOG_E("Failed to find video decoder");
+        return;
     }
 
-    if (avcodec_open2(codec_context_, codec, nullptr) < 0) {
+    codecContext = avcodec_alloc_context3(codec);
+    if (!codecContext) {
+        LOG_E("Failed to allocate AVCodecContext");
+        return;
+    }
+
+    codecContext->width = format->width;
+    codecContext->height = format->height;
+    if (!format->extradata.empty()) {
+        codecContext->extradata = static_cast<uint8_t*>(av_malloc(format->extradata.size() + AV_INPUT_BUFFER_PADDING_SIZE));
+        memcpy(codecContext->extradata, format->extradata.data(), format->extradata.size());
+        codecContext->extradata_size = format->extradata.size();
+    }
+
+    if (avcodec_open2(codecContext, codec, nullptr) < 0) {
+        LOG_E("Failed to open video codec");
         doStop();
         return;
     }
-    av_frame_ = av_frame_alloc();
+    avFrame = av_frame_alloc();
 }
 
 void FfmpegVideoDecoder::doSetRenderer(const std::shared_ptr<Renderer>& renderer) {
@@ -67,38 +79,54 @@ void FfmpegVideoDecoder::doSetExtractor(const std::shared_ptr<Extractor>& extrac
 }
 
 void FfmpegVideoDecoder::doStart() {
-    requestInputBuffers();
+    sendMessage({kWhatRequestInputBuffers});
 }
 
 void FfmpegVideoDecoder::doStop() {
-    // Cleanup logic
+    if (swsContext) {
+        sws_freeContext(swsContext);
+        swsContext = nullptr;
+    }
+    if (avFrame) {
+        av_frame_free(&avFrame);
+        avFrame = nullptr;
+    }
+    if (codecContext) {
+        if (codecContext->extradata) {
+            av_freep(&codecContext->extradata);
+        }
+        avcodec_free_context(&codecContext);
+        codecContext = nullptr;
+    }
 }
 
 void FfmpegVideoDecoder::doFlush() {
-    if (codec_context_) {
-        avcodec_flush_buffers(codec_context_);
+    if (codecContext) {
+        avcodec_flush_buffers(codecContext);
     }
-    frame_queue_.Flush();
+    frameQueue.flush();
 }
 
 void FfmpegVideoDecoder::doRequestInputBuffers() {
-    if (!extractor_ || !codec_context_) return;
+    if (!extractor_ || !codecContext) return;
 
     auto sample = extractor_->getSample(MediaType::VIDEO);
     if (!sample) return; 
 
     AVPacket* packet = av_packet_alloc();
     if (sample->is_eos) {
-        avcodec_send_packet(codec_context_, nullptr);
+        avcodec_send_packet(codecContext, nullptr);
     } else {
-        av_packet_from_data(packet, sample->data.data(), sample->data.size());
-        packet->pts = sample->pts;
-        avcodec_send_packet(codec_context_, packet);
+        if (av_new_packet(packet, sample->data.size()) == 0) {
+            memcpy(packet->data, sample->data.data(), sample->data.size());
+            packet->pts = sample->pts;
+            avcodec_send_packet(codecContext, packet);
+        }
     }
     av_packet_free(&packet);
 
     while (true) {
-        int ret = avcodec_receive_frame(codec_context_, av_frame_);
+        int ret = avcodec_receive_frame(codecContext, avFrame);
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
             break; 
         } else if (ret < 0) {
@@ -106,9 +134,10 @@ void FfmpegVideoDecoder::doRequestInputBuffers() {
         }
         
         auto video_frame = std::make_shared<MediaFrame>();
-        video_frame->pts = av_frame_->pts;
+        video_frame->pts = avFrame->pts;
         // The actual frame data conversion would happen here
-        frame_queue_.Push(video_frame);
+        // For now just pushing empty frame or placeholder
+        frameQueue.push(video_frame);
     }
 
     if (!sample->is_eos) {

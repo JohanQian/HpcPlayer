@@ -11,23 +11,26 @@
 #include "renderer/andriod/AudioOpenSLESRenderer.h"
 #include "common/HpcMessage.h"
 #include "common/MediaClock.h"
+#include "HpcPlayer.h"
 
 namespace {
     constexpr char kTag[] = "HpcCore";
 } 
 
-std::shared_ptr<HpcCore> HpcCore::create() {
+std::shared_ptr<HpcCore> HpcCore::create(std::weak_ptr<HpcPlayer> player) {
     auto looper = std::make_shared<Looper>("HpcCore");
-    auto core = std::shared_ptr<HpcCore>(new HpcCore(looper));
+    auto core = std::shared_ptr<HpcCore>(new HpcCore(player, looper));
     core->init();
-    core->looper->start();
+    looper->start();
     return core;
 }
 
-HpcCore::HpcCore(std::shared_ptr<Looper> looper) : Handler(looper), looper(looper) {}
+HpcCore::HpcCore(std::weak_ptr<HpcPlayer> player, std::shared_ptr<Looper> looper) 
+    : Handler(looper), looper(looper), player(player) {}
 
 void HpcCore::init() {
-    extractor = std::make_shared<FfmpegExtractor>();
+    auto self = std::static_pointer_cast<HpcCore>(shared_from_this());
+    extractor = std::make_shared<FfmpegExtractor>(self);
     
     // Initialize MediaClock
     mediaClock = std::make_shared<MediaClock>();
@@ -39,7 +42,7 @@ void HpcCore::init() {
     videoRenderer->setMediaClock(mediaClock);
 
     // Initialize Decoders
-    auto videoLooper = std::make_shared<Looper>("VideoDecoder");
+    videoLooper = std::make_shared<Looper>("VideoDecoder");
     videoLooper->start(); // Start the looper!
     videoDecoder = std::make_shared<MediaCodecVideoDecoder>(videoLooper);
     videoDecoder->setExtractor(extractor);
@@ -53,7 +56,16 @@ void HpcCore::init() {
 
 HpcCore::~HpcCore() {
     if (isRunning.load()) {
-        release();
+        doStop();
+        if (looper) {
+            looper->quit();
+        }
+    }
+    if (videoLooper) {
+        videoLooper->quit();
+    }
+    if (audioLooper) {
+        audioLooper->quit();
     }
 }
 
@@ -129,6 +141,12 @@ void HpcCore::onMessageReceived(const Message& msg) {
         case kWhatSeek: 
             doSeekTo(msg.arg1); 
             break;
+        case kWhatSourceNotify:
+            if (msg.obj) {
+                auto innerMsg = std::static_pointer_cast<Message>(msg.obj);
+                onSourceNotify(*innerMsg);
+            }
+            break;
         case kWhatMediaClockNotify: 
             doRelease(); 
             break;
@@ -151,44 +169,7 @@ void HpcCore::doPrepare() {
     if (!extractor) {
         return;
     }
-    extractor->prepare();
-    // Find tracks
-    size_t trackCount = extractor->getTrackCount();
-    for (size_t i = 0; i < trackCount; ++i) {
-        auto format = extractor->getTrackFormat(i);
-        if (format->mime_type.find("video/") == 0 && videoStreamIndex < 0) {
-            videoStreamIndex = i;
-            extractor->selectTrack(i);
-            if (videoDecoder) {
-                videoDecoder->configure(format);
-            }
-        } else if (format->mime_type.find("audio/") == 0 && audioStreamIndex < 0) {
-            if (!audioRenderer) {
-                audioRenderer = std::make_shared<AudioOpenSLESRenderer>();
-                audioRenderer->setMediaFormat(format);
-                audioRenderer->init();
-                audioRenderer->setMediaClock(mediaClock);
-            }
-            if (!audioDecoder) {
-                auto audioLooper = std::make_shared<Looper>("AudioDecoder");
-                audioLooper->start();
-                audioDecoder = std::make_shared<FfmpegAudioDecoder>(audioLooper);
-                audioDecoder->setExtractor(extractor);
-                audioDecoder->setRenderer(audioRenderer);
-                audioRenderer->setDecoder(audioDecoder);
-                mediaClock->onRendererEnabled(audioRenderer);
-            }
-            
-            audioStreamIndex = i;
-            extractor->selectTrack(i);
-            if (audioDecoder) {
-                audioDecoder->configure(format);
-            }
-        }
-    }
-    if (messageCallback) {
-        messageCallback({MSG_PREPARE_COMPLETED});
-    }
+    extractor->prepareAsync();
 }
 
 void HpcCore::doStart() {
@@ -286,7 +267,9 @@ void HpcCore::doSeekTo(long msec) {
 void HpcCore::doRelease() {
     if (isRunning.exchange(false)) {
         doStop();
-        // looper->stop(); // Remove this line
+        if (looper) {
+            looper->quit();
+        }
     }
 }
 
@@ -295,4 +278,63 @@ int64_t HpcCore::getDuration() {
         return extractor->getDuration();
     }
     return 0;
+}
+
+void HpcCore::initDecoder() {
+    // Find tracks
+    size_t trackCount = extractor->getTrackCount();
+    for (size_t i = 0; i < trackCount; ++i) {
+        auto format = extractor->getTrackFormat(i);
+        if (format->mime_type.find("video/") == 0 && videoStreamIndex < 0) {
+            videoStreamIndex = i;
+            extractor->selectTrack(i);
+            if (videoDecoder) {
+                videoDecoder->configure(format);
+            }
+        } else if (format->mime_type.find("audio/") == 0 && audioStreamIndex < 0) {
+            if (!audioRenderer) {
+                audioRenderer = std::make_shared<AudioOpenSLESRenderer>();
+                audioRenderer->setMediaFormat(format);
+                audioRenderer->init();
+                audioRenderer->setMediaClock(mediaClock);
+            }
+            if (!audioDecoder) {
+                audioLooper = std::make_shared<Looper>("AudioDecoder");
+                audioLooper->start();
+                audioDecoder = std::make_shared<FfmpegAudioDecoder>(audioLooper);
+                audioDecoder->setExtractor(extractor);
+                audioDecoder->setRenderer(audioRenderer);
+                audioRenderer->setDecoder(audioDecoder);
+                mediaClock->onRendererEnabled(audioRenderer);
+            }
+
+            audioStreamIndex = i;
+            extractor->selectTrack(i);
+            if (audioDecoder) {
+                audioDecoder->configure(format);
+            }
+        }
+    }
+}
+
+void HpcCore::onSourceNotify(const Message &msg) {
+    switch (msg.what) {
+        case Extractor::kWhatPrepared: {
+            status_t err = static_cast<status_t>(msg.arg1);
+            if (err != 0) {
+                if (auto p = player.lock()) {
+                    p->notifyPrepareCompleted(err);
+                }
+                return;
+            }
+
+            initDecoder(); // Initialize decoders after extractor is prepared
+
+            if (auto p = player.lock()) {
+                p->notifyDuration(extractor->getDuration());
+                p->notifyPrepareCompleted(0);
+            }
+            break;
+        }
+    }
 }

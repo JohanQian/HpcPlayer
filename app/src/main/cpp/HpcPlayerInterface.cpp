@@ -9,16 +9,9 @@
 #define ALOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 #endif
 
-HpcPlayerInterface::HpcPlayerInterface() {
-}
-
-HpcPlayerInterface::~HpcPlayerInterface() {
-}
-
-status_t HpcPlayerInterface::setListener(const std::shared_ptr<HpcPlayerListener>& listener) {
+void HpcPlayerInterface::setListener(const std::shared_ptr<HpcPlayerListener>& listener) {
     std::lock_guard<std::mutex> lock(mNotifyLock);
     mListener = listener;
-    return 0; // OK
 }
 
 void HpcPlayerInterface::notify(int msg, int ext1, int ext2, const void *obj) {

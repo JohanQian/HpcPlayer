@@ -21,6 +21,7 @@ public:
 
     void start();
     void stop();
+    void quit();
     void post(std::function<void()> task);
 
 private:

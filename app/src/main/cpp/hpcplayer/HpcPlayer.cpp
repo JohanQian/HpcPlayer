@@ -6,14 +6,26 @@ namespace {
     constexpr char kTag[] = "HpcPlayer";
 }
 
-HpcPlayer::HpcPlayer() : core(HpcCore::create()), state(kStateIdle) {
+std::shared_ptr<HpcPlayer> HpcPlayer::create() {
+    auto player = std::shared_ptr<HpcPlayer>(new HpcPlayer());
+    player->init();
+    return player;
+}
+
+HpcPlayer::HpcPlayer() : state(kStateIdle) {
+}
+
+void HpcPlayer::init() {
+    core = HpcCore::create(weak_from_this());
     core->setMessageCallback([this](const Message& msg) {
         onMessage(msg);
     });
 }
 
 HpcPlayer::~HpcPlayer() {
-    core->release();
+    if (core) {
+        core->release();
+    }
 }
 
 void HpcPlayer::setDataSource(const char* path) {
@@ -24,12 +36,16 @@ void HpcPlayer::setDataSource(const char* path) {
         }
         state = kStateSetDataSourcePending;
     }
-    core->setDataSource(path);
+    if (core) {
+        core->setDataSource(path);
+    }
 }
 
 void HpcPlayer::setSurface(std::shared_ptr<ANativeWindow> window) {
     std::lock_guard<std::mutex> lk(lock);
-    core->setSurface(window);
+    if (core) {
+        core->setSurface(window);
+    }
 }
 
 void HpcPlayer::prepareAsync() {
@@ -38,7 +54,9 @@ void HpcPlayer::prepareAsync() {
         case kStateUnprepared:
             state = kStatePreparing;
             isAsyncPrepare = false;
-            core->prepare();
+            if (core) {
+                core->prepare();
+            }
             while (state == kStatePreparing) {
                 condition.wait(lk);
             }
@@ -63,7 +81,9 @@ void HpcPlayer::start() {
         case kStatePaused:
         case kStateStopped:
         {
-            core->start();
+            if (core) {
+                core->start();
+            }
             state = kStateRunning;
             break;
         }
@@ -79,7 +99,9 @@ void HpcPlayer::resume() {
     if (state != kStatePaused) {
         return;
     }
-    core->resume();
+    if (core) {
+        core->resume();
+    }
     state = kStateRunning;
 }
 
@@ -88,7 +110,9 @@ void HpcPlayer::pause() {
     if (state != kStateRunning) {
         return;
     }
-    core->pause();
+    if (core) {
+        core->pause();
+    }
     state = kStatePaused;
 }
 
@@ -97,13 +121,17 @@ void HpcPlayer::stop() {
     if (state != kStateRunning && state != kStatePaused && state != kStatePrepared) {
         return;
     }
-    core->stop();
+    if (core) {
+        core->stop();
+    }
     state = kStateStopped;
 }
 
 void HpcPlayer::seekTo(long msec) {
     std::lock_guard<std::mutex> lk(lock);
-    core->seekTo(msec);
+    if (core) {
+        core->seekTo(msec);
+    }
     if (state == kStatePaused) {
         state = kStateRunning;
     }
@@ -115,11 +143,17 @@ void HpcPlayer::setLooping(bool looping) {
 }
 
 int64_t HpcPlayer::getCurrentPosition() {
-    return core->getCurrentPosition();
+    if (core) {
+        return core->getCurrentPosition();
+    }
+    return 0;
 }
 
 int64_t HpcPlayer::getDuration() {
-    return core->getDuration();
+    if (core) {
+        return core->getDuration();
+    }
+    return 0;
 }
 
 void HpcPlayer::onMessage(const Message& msg) {
@@ -134,8 +168,9 @@ void HpcPlayer::onMessage(const Message& msg) {
         }
         case MSG_PREPARE_COMPLETED:
         {
-            status_t err = static_cast<status_t>(msg.arg1);
-            notifyPrepareCompleted(err);
+            // Handled via direct call from HpcCore now, but keeping for compatibility if needed
+            // status_t err = static_cast<status_t>(msg.arg1);
+            // notifyPrepareCompleted(err);
             break;
         }
         case MSG_PLAYBACK_COMPLETED:
@@ -190,11 +225,15 @@ void HpcPlayer::notifyListenerL(int msg, int ext1, int ext2) {
         {
             if (state != kStateResetInProgress) {
                 if (looping || autoLoop) {
-                    core->seekTo(0);
+                    if (core) {
+                        core->seekTo(0);
+                    }
                     return;
                 }
                 
-                core->pause();
+                if (core) {
+                    core->pause();
+                }
                 state = kStatePaused;
             }
             break;

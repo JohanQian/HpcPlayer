@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/MediaSample.h"
+#include "common/HpcStatus.h"
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -14,10 +15,16 @@ enum class MediaType {
 
 class Extractor {
 public:
+    enum {
+        kWhatPrepared,
+        kWhatFlagsChanged,
+        kWhatVideoSizeChanged
+    };
+
     virtual ~Extractor() = default;
 
     virtual void setDataSource(const std::string& path) = 0;
-    virtual void prepare() = 0;
+    virtual void prepareAsync() = 0;
     virtual void start() = 0;
     virtual void pause() = 0;
     virtual void resume() = 0;
@@ -30,4 +37,6 @@ public:
     virtual int64_t getDuration() = 0;
 
     virtual std::shared_ptr<MediaSample> getSample(MediaType type) = 0;
+
+    virtual void notifyPrepared(status_t err) = 0;
 };

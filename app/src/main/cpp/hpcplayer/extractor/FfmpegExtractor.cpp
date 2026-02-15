@@ -3,6 +3,7 @@
 #include "common/MediaFormat.h"
 #include "common/Message.h"
 #include "common/MediaSample.h"
+#include "../HpcCore.h"
 
 extern "C" {
 #include "libavutil/error.h"
@@ -43,8 +44,8 @@ namespace {
     }
 }
 
-FfmpegExtractor::FfmpegExtractor() 
-    : Handler(std::make_shared<Looper>("FfmpegExtractor")) 
+FfmpegExtractor::FfmpegExtractor(std::weak_ptr<HpcCore> core) 
+    : Handler(std::make_shared<Looper>("FfmpegExtractor")), core(core)
 {
     looper_->start();
     avformat_network_init();
@@ -52,22 +53,21 @@ FfmpegExtractor::FfmpegExtractor()
 
 FfmpegExtractor::~FfmpegExtractor() {
     looper_->stop();
-    if (format_context_) {
-        avformat_close_input(&format_context_);
+    if (formatContext) {
+        avformat_close_input(&formatContext);
     }
-    if (bsf_context_) {
-        av_bsf_free(&bsf_context_);
+    if (bsfContext) {
+        av_bsf_free(&bsfContext);
     }
     avformat_network_deinit();
 }
 
 void FfmpegExtractor::setDataSource(const std::string& path) {
-    data_source_path_ = path;
+    dataSourcePath = path;
 }
 
-void FfmpegExtractor::prepare() {
-    //sendMessage({kWhatPrepare});
-    doPrepare();
+void FfmpegExtractor::prepareAsync() {
+    sendMessage({kWhatPrepare});
 }
 
 void FfmpegExtractor::start() {
@@ -98,9 +98,9 @@ std::shared_ptr<MediaSample> FfmpegExtractor::getSample(MediaType type) {
     std::shared_ptr<MediaSample> sample = nullptr;
     bool success = false;
     if (type == MediaType::VIDEO) {
-        success = video_packet_queue_.WaitAndPop(&sample);
+        success = videoPacketQueue.waitAndPop(&sample);
     } else if (type == MediaType::AUDIO) {
-        success = audio_packet_queue_.WaitAndPop(&sample);
+        success = audioPacketQueue.waitAndPop(&sample);
     }
     
     if (success) {
@@ -110,15 +110,15 @@ std::shared_ptr<MediaSample> FfmpegExtractor::getSample(MediaType type) {
 }
 
 size_t FfmpegExtractor::getTrackCount() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return format_context_ ? format_context_->nb_streams : 0;
+    std::lock_guard<std::mutex> lock(mutex);
+    return formatContext ? formatContext->nb_streams : 0;
 }
 
 std::shared_ptr<MediaFormat> FfmpegExtractor::getTrackFormat(size_t index) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!format_context_ || index >= format_context_->nb_streams) return nullptr;
+    std::lock_guard<std::mutex> lock(mutex);
+    if (!formatContext || index >= formatContext->nb_streams) return nullptr;
     
-    AVCodecParameters* params = format_context_->streams[index]->codecpar;
+    AVCodecParameters* params = formatContext->streams[index]->codecpar;
     auto media_format = std::make_shared<MediaFormat>();
     media_format->codec_id = params->codec_id;
     
@@ -174,12 +174,12 @@ std::shared_ptr<MediaFormat> FfmpegExtractor::getTrackFormat(size_t index) {
 }
 
 void FfmpegExtractor::selectTrack(size_t index) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!format_context_ || index >= format_context_->nb_streams) return;
+    std::lock_guard<std::mutex> lock(mutex);
+    if (!formatContext || index >= formatContext->nb_streams) return;
 
-    AVCodecParameters* params = format_context_->streams[index]->codecpar;
+    AVCodecParameters* params = formatContext->streams[index]->codecpar;
     if (params->codec_type == AVMEDIA_TYPE_VIDEO) {
-        video_stream_index_ = index;
+        videoStreamIndex = index;
         
         // Initialize Bitstream Filter
         const char* filter_name = nullptr;
@@ -188,126 +188,151 @@ void FfmpegExtractor::selectTrack(size_t index) {
         
         if (filter_name) {
             const AVBitStreamFilter* bsf = av_bsf_get_by_name(filter_name);
-            if (bsf && av_bsf_alloc(bsf, &bsf_context_) >= 0) {
-                avcodec_parameters_copy(bsf_context_->par_in, params);
-                av_bsf_init(bsf_context_);
+            if (bsf && av_bsf_alloc(bsf, &bsfContext) >= 0) {
+                avcodec_parameters_copy(bsfContext->par_in, params);
+                av_bsf_init(bsfContext);
             }
         }
     } else if (params->codec_type == AVMEDIA_TYPE_AUDIO) {
-        audio_stream_index_ = index;
+        audioStreamIndex = index;
     }
 }
 
 void FfmpegExtractor::onMessageReceived(const Message& msg) {
     switch (msg.what) {
-        case kWhatPrepare: doPrepare(); break;
-        case kWhatStart: doStart(); break;
-        case kWhatPause: doPause(); break;
-        case kWhatResume: doResume(); break;
-        case kWhatStop: doStop(); break;
-        case kWhatSeek: doSeekTo(msg.arg1); break;
-        case kWhatReadBuffer: doReadBuffer(); break;
+        case kWhatPrepare: {
+            doPrepare();
+            break;
+        }
+        case kWhatStart: {
+            doStart();
+            break;
+        }
+        case kWhatPause: {
+            doPause();
+            break;
+        }
+        case kWhatResume: {
+            doResume();
+            break;
+        }
+        case kWhatStop: {
+            doStop();
+            break;
+        }
+        case kWhatSeek: {
+            doSeekTo(msg.arg1);
+            break;
+        }
+        case kWhatReadBuffer: {
+            doReadBuffer();
+            break;
+        }
     }
 }
 
 void FfmpegExtractor::doPrepare() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (format_context_) {
-        avformat_close_input(&format_context_);
+    std::lock_guard<std::mutex> lock(mutex);
+    if (formatContext) {
+        avformat_close_input(&formatContext);
     }
-    format_context_ = nullptr;
-    int ret = avformat_open_input(&format_context_, data_source_path_.c_str(), nullptr, nullptr);
+    formatContext = nullptr;
+    int ret = avformat_open_input(&formatContext, dataSourcePath.c_str(), nullptr, nullptr);
     if (ret < 0) {
         LOG_E("Failed to open input: %s", av_err2str(ret));
+        notifyPrepared(ret);
         return;
     }
-    ret = avformat_find_stream_info(format_context_, nullptr);
+    ret = avformat_find_stream_info(formatContext, nullptr);
     if (ret < 0) {
         LOG_E("Failed to find stream info: %s", av_err2str(ret));
-        avformat_close_input(&format_context_);
-        format_context_ = nullptr;
+        avformat_close_input(&formatContext);
+        formatContext = nullptr;
+        notifyPrepared(ret);
+        return;
     }
+    notifyPrepared(0);
 }
 
 void FfmpegExtractor::doStart() {
-    is_playing_.store(true);
-    video_packet_queue_.Reset();
-    audio_packet_queue_.Reset();
+    isPlaying.store(true);
+    videoPacketQueue.reset();
+    audioPacketQueue.reset();
     postReadBuffer(); 
 }
 
 void FfmpegExtractor::doPause() {
-    is_playing_.store(false);
+    isPlaying.store(false);
 }
 
 void FfmpegExtractor::doResume() {
-    is_playing_.store(true);
+    isPlaying.store(true);
     postReadBuffer();
 }
 
 void FfmpegExtractor::doStop() {
-    is_playing_.store(false);
-    video_packet_queue_.Abort();
-    audio_packet_queue_.Abort();
+    isPlaying.store(false);
+    videoPacketQueue.abort();
+    audioPacketQueue.abort();
 }
 
 void FfmpegExtractor::doSeekTo(int64_t msec) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!format_context_) return;
-    video_packet_queue_.Flush();
-    audio_packet_queue_.Flush();
+    std::lock_guard<std::mutex> lock(mutex);
+    if (!formatContext) return;
+    videoPacketQueue.flush();
+    audioPacketQueue.flush();
     int64_t seek_ts = av_rescale(msec, AV_TIME_BASE, 1000);
-    av_seek_frame(format_context_, -1, seek_ts, AVSEEK_FLAG_BACKWARD);
-    if (bsf_context_) {
-        av_bsf_flush(bsf_context_);
+    av_seek_frame(formatContext, -1, seek_ts, AVSEEK_FLAG_BACKWARD);
+    if (bsfContext) {
+        av_bsf_flush(bsfContext);
     }
-    is_seek_ = true;
+    isSeek = true;
     postReadBuffer(); 
 }
 
 void FfmpegExtractor::doReadBuffer() {
-    if (!is_playing_.load()) return;
+    if (!isPlaying.load()) return;
 
     AVPacket* packet = av_packet_alloc();
     int ret;
     {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if(!format_context_){
+        std::lock_guard<std::mutex> lock(mutex);
+        if(!formatContext){
             av_packet_free(&packet);
             return;
         }
-        ret = av_read_frame(format_context_, packet);
+        ret = av_read_frame(formatContext, packet);
     }
 
     if (ret >= 0) {
-        if (packet->stream_index == video_stream_index_) {
-            if (bsf_context_) {
-                av_bsf_send_packet(bsf_context_, packet);
-                while (av_bsf_receive_packet(bsf_context_, packet) == 0) {
+        if (packet->stream_index == videoStreamIndex) {
+            if (bsfContext) {
+                av_bsf_send_packet(bsfContext, packet);
+                while (av_bsf_receive_packet(bsfContext, packet) == 0) {
                     auto sample = std::make_shared<MediaSample>();
                     sample->data.resize(packet->size);
                     memcpy(sample->data.data(), packet->data, packet->size);
-                    sample->pts = av_rescale_q(packet->pts, format_context_->streams[packet->stream_index]->time_base, {1, 1000000});
-                    video_packet_queue_.Push(sample);
+                    sample->pts = av_rescale_q(packet->pts, formatContext->streams[packet->stream_index]->time_base, {1, 1000000});
+                    videoPacketQueue.push(sample);
                     av_packet_unref(packet);
                 }
             } else {
                 auto sample = std::make_shared<MediaSample>();
                 sample->data.resize(packet->size);
                 memcpy(sample->data.data(), packet->data, packet->size);
-                sample->pts = av_rescale_q(packet->pts, format_context_->streams[packet->stream_index]->time_base, {1, 1000000});
-                video_packet_queue_.Push(sample);
+                sample->pts = av_rescale_q(packet->pts, formatContext->streams[packet->stream_index]->time_base, {1, 1000000});
+                videoPacketQueue.push(sample);
             }
-        } else if (packet->stream_index == audio_stream_index_) {
+        } else if (packet->stream_index == audioStreamIndex) {
             auto sample = std::make_shared<MediaSample>();
             sample->data.resize(packet->size);
             memcpy(sample->data.data(), packet->data, packet->size);
-            sample->pts = av_rescale_q(packet->pts, format_context_->streams[packet->stream_index]->time_base, {1, 1000000});
-            if (is_seek_) {
+            sample->pts = av_rescale_q(packet->pts, formatContext->streams[packet->stream_index]->time_base, {1, 1000000});
+            if (isSeek) {
                 sample->is_seek_frame = true;
-                is_seek_ = false;
+                isSeek = false;
             }
-            audio_packet_queue_.Push(sample);
+            audioPacketQueue.push(sample);
         }
         av_packet_unref(packet);
         postReadBuffer(); 
@@ -315,18 +340,27 @@ void FfmpegExtractor::doReadBuffer() {
         if (ret == AVERROR_EOF) {
             auto eos_sample = std::make_shared<MediaSample>();
             eos_sample->is_eos = true;
-            video_packet_queue_.Push(eos_sample);
-            audio_packet_queue_.Push(eos_sample);
-            is_playing_.store(false);
+            videoPacketQueue.push(eos_sample);
+            audioPacketQueue.push(eos_sample);
+            isPlaying.store(false);
         }
     }
     av_packet_free(&packet);
 }
 
 int64_t FfmpegExtractor::getDuration() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (format_context_ && format_context_->duration != AV_NOPTS_VALUE) {
-        return av_rescale(format_context_->duration, 1000, AV_TIME_BASE);
+    std::lock_guard<std::mutex> lock(mutex);
+    if (formatContext && formatContext->duration != AV_NOPTS_VALUE) {
+        return av_rescale(formatContext->duration, 1000, AV_TIME_BASE);
     }
     return 0;
+}
+
+void FfmpegExtractor::notifyPrepared(status_t err) {
+    if (auto c = core.lock()) {
+        auto msg = std::make_shared<Message>();
+        msg->what = Extractor::kWhatPrepared;
+        msg->arg1 = err;
+        c->sendMessage({.what = HpcCore::kWhatSourceNotify, .obj = msg});
+    }
 }

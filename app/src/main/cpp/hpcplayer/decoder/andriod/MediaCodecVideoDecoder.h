@@ -26,10 +26,10 @@ private:
     void doFlush();
     void doRequestInputBuffers();
 
-    AMediaCodec* codec_ = nullptr;
-    std::shared_ptr<ANativeWindow> native_window_ = nullptr;
-    bool codec_started_ = false;
+    AMediaCodec* codec = nullptr;
+    std::shared_ptr<ANativeWindow> nativeWindow = nullptr;
+    bool codecStarted = false;
 
-    std::shared_ptr<MediaSample> pending_sample_ = nullptr;
-    bool is_input_eos_queued_ = false;
+    std::shared_ptr<MediaSample> pendingSample = nullptr;
+    bool isInputEosQueued = false;
 };

@@ -40,5 +40,5 @@ protected:
     std::shared_ptr<Renderer> renderer_;
     std::shared_ptr<Extractor> extractor_;
     // Limit decoder output queue to avoid OOM if renderer is slow
-    DataQueue<std::shared_ptr<MediaFrame>> frame_queue_{16};
+    DataQueue<std::shared_ptr<MediaFrame>> frameQueue{16};
 };
