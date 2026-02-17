@@ -244,24 +244,25 @@ void HpcCore::doStop() {
     }
 }
 
-void HpcCore::doSeekTo(long msec) {
-    if (!extractor) {
+void HpcCore::doSeekTo(long msec)
+{
+    if (!extractor)
         return;
-    }
 
-    doPause();
-    // Flush renderers first to stop them from pulling old data
-    if (videoRenderer) videoRenderer->flush();
-    if (audioRenderer) audioRenderer->flush();
-    
-    // Flush decoders
-    if (videoDecoder) videoDecoder->flush();
-    if (audioDecoder) audioDecoder->flush();
+    if (videoDecoder)
+        videoDecoder->flush();
+
+    if (audioDecoder)
+        audioDecoder->flush();
+
+    if (videoRenderer)
+        videoRenderer->flush();
+    if (audioRenderer)
+        audioRenderer->flush();
 
     extractor->seekTo(msec);
     mediaClock->syncPosition(msec * 1000);
-    
-    doResume();
+
 }
 
 void HpcCore::doRelease() {

@@ -4,11 +4,15 @@
 #include <atomic>
 #include <mutex>
 #include <queue>
+#include <utility>
+#include <memory>
+#include <vector>
 
 #include <SLES/OpenSLES.h>
 #include <SLES/OpenSLES_Android.h>
 
 #include "../Renderer.h"
+#include "common/Message.h"
 
 class AudioOpenSLESRenderer final : public Renderer {
 public:
@@ -23,14 +27,13 @@ protected:
 
 private:
     void doSetDecoder(const std::shared_ptr<Decoder>& decoder);
-    void doRender(const std::shared_ptr<MediaFrame>& frame);
+    bool doRender(const std::shared_ptr<MediaFrame>& frame);
     void doDrainQueue();
     void doFlush();
     void doPause();
     void doResume();
     void doRelease();
-    void doEnqueue();
-    bool ensurePlayerInitialized(int sampleRate, int channels);
+    void notifyConsume(bool fromCallback = false);
 
     static void playerCallback(SLAndroidSimpleBufferQueueItf bq, void* context);
 
@@ -44,20 +47,18 @@ private:
     void createEngine();
     void createOutputMix();
     bool createPlayer(int sampleRate, int channels);
-    
+
     int64_t currentPositionUs{0};
     std::mutex playerMutex;
-    
-    int64_t startPts{-1};
-    
-    // Keep track of the current frame being played to ensure data validity
-    std::shared_ptr<MediaFrame> currentFrame;
 
-    // Position tracking
+    int64_t startPts{-1};
+
     std::atomic<int64_t> playedBytes{0};
     int64_t bytesPerSecond = 0;
-    std::queue<size_t> pendingBufferSizes;
-    std::mutex queueMutex;
+    std::queue<std::shared_ptr<MediaFrame>> renderingQueue;
+    std::vector<std::shared_ptr<MediaFrame>> bufferGraveyard;
+    std::shared_ptr<MediaFrame> pendingFrame{nullptr};
+
 };
 
-#endif // HPC_PLAYER_RENDERER_ANDROID_AUDIO_OPEN_SLES_RENDERER_H_
+#endif

@@ -22,7 +22,6 @@ public:
     void flush();
     void requestInputBuffers();
 
-    std::shared_ptr<MediaFrame> getFrame();
 
 protected:
     void onMessageReceived(const Message& msg) override = 0;
@@ -37,8 +36,7 @@ protected:
         kWhatRequestInputBuffers = 'reqB',
     };
 
-    std::shared_ptr<Renderer> renderer_;
+    std::shared_ptr<Renderer> videoRenderer;
+    std::shared_ptr<Renderer> audioRenderer;
     std::shared_ptr<Extractor> extractor_;
-    // Limit decoder output queue to avoid OOM if renderer is slow
-    DataQueue<std::shared_ptr<MediaFrame>> frameQueue{16};
 };

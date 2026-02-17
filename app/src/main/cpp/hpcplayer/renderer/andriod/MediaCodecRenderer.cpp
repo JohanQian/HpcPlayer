@@ -32,10 +32,16 @@ void MediaCodecRenderer::onMessageReceived(const Message& msg) {
             doDrainQueue();
             break;
         case kWhatFlush:
+            frameQueue.flush();
             isFlushing = false;
             firstFrameAfterFlush = true;
-            // After flush, we need to restart draining the queue
-            sendMessage({kWhatDrainVideoQueue});
+            isFirstFrame = true;
+            break;
+        case kWhatQueueBuffer:
+            doQueueBuffer(std::static_pointer_cast<MediaFrame>(msg.obj));
+            break;
+        case kWhatConsume:
+            notifyConsume();
             break;
     }
 }
@@ -45,20 +51,45 @@ void MediaCodecRenderer::doSetDecoder(const std::shared_ptr<Decoder>& decoder) {
 }
 
 void MediaCodecRenderer::doDrainQueue() {
+//    if (isPaused || !decoder) {
+//        return;
+//    }
+//
+//    auto optFrame = frameQueue.waitAndPopFor(std::chrono::milliseconds(5));
+//    if (optFrame) {
+//        auto frame = *optFrame;
+//        if (frame) {
+//            doRender(frame);
+//        }
+//    }
+}
+
+void MediaCodecRenderer::doQueueBuffer(const std::shared_ptr<MediaFrame>& frame) {
+//    if (isPaused || !decoder || !frame) {
+//        return;
+//    }
+//    if (isFirstFrame) {
+//        isFirstFrame = false;
+//        AMediaCodec_releaseOutputBuffer(frame->codec, frame->index, true);
+//        notifyConsume();
+//        return;
+//    }
+//    frameQueue.push(frame);
+}
+
+void MediaCodecRenderer::notifyConsume() {
     if (isPaused || !decoder) {
         return;
     }
 
-    std::shared_ptr<MediaFrame> frame = decoder->getFrame();
-    if (frame) {
-        doRender(frame);
-        sendMessage({kWhatDrainVideoQueue}); // Loop to drain the next frame
+    auto optFrame = frameQueue.tryPop();
+    if (optFrame) {
+        auto frame = *optFrame;
+        if (frame) {
+            doRender(frame);
+        }
     } else {
-        // If no frame is available, try again later to avoid busy loop if GetFrame returns null immediately
-        // But since we changed GetFrame to wait with timeout, we can just loop.
-        // However, if GetFrame timed out, we should probably check for pause/flush again.
-        // Sending a message to self allows processing other messages in the queue.
-        sendMessage({kWhatDrainVideoQueue});
+        sendMessage({kWhatConsume});
     }
 }
 
@@ -72,4 +103,6 @@ void MediaCodecRenderer::doRender(const std::shared_ptr<MediaFrame>& frame) {
     } else {
         AMediaCodec_releaseOutputBuffer(frame->codec, frame->index, false);
     }
+
+    sendMessage({kWhatConsume});
 }

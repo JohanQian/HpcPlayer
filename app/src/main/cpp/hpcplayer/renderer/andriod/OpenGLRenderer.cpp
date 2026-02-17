@@ -49,43 +49,75 @@
 //}
 //
 //HpcStatus OpenGLRenderer::Init(const std::any& params) {
-//    ANativeWindow* window = nullptr;
 //    try {
-//        window = std::any_cast<ANativeWindow*>(params);
+//        auto pair = std::any_cast<std::pair<ANativeWindow*, std::shared_ptr<MediaClock>>>(params);
+//        window_ = pair.first;
+//        clock_ = pair.second;
 //    } catch (const std::bad_any_cast& e) {
-//        LOG_E("Init: Failed to cast params to ANativeWindow*.");
+//        LOG_E("Init: Failed to cast params.");
 //        return HpcStatus::kBadType;
 //    }
 //
-//    if (egl_env_.Init() != HpcStatus::kOk) return HpcStatus::kUnknownError;
-//    if (egl_env_.CreateSurface(window) != HpcStatus::kOk) return HpcStatus::kUnknownError;
-//    if (egl_env_.MakeCurrent() != HpcStatus::kOk) return HpcStatus::kUnknownError;
+//    done_ = false;
+//    thread_ = std::thread(&OpenGLRenderer::Run, this);
 //
-//    return SetupShaders();
+//    return HpcStatus::kOk;
 //}
 //
 //HpcStatus OpenGLRenderer::Render(std::shared_ptr<MediaFrame> frame) {
-//    auto ffmpeg_frame = std::dynamic_pointer_cast<FfmpegVideoFrame>(frame);
-//    if (!ffmpeg_frame || !ffmpeg_frame->frame) {
-//        LOG_E("Render: Received a frame that is not an FfmpegVideoFrame.");
-//        return HpcStatus::kBadType;
-//    }
-//
-//    if (SetupTextures(frame) != HpcStatus::kOk) {
-//        return HpcStatus::kUnknownError;
-//    }
-//
-//    Draw();
-//
-//    return egl_env_.SwapBuffers();
+//    auto msg = Message();
+//    msg.what = kWhatQueueBuffer;
+//    msg.obj = std::move(frame);
+//    post(msg);
+//    return HpcStatus::kOk;
 //}
 //
 //void OpenGLRenderer::Release() {
-//    egl_env_.Release();
-//    shader_.Release();
-//    if (y_texture_) glDeleteTextures(1, &y_texture_);
-//    if (u_texture_) glDeleteTextures(1, &u_texture_);
-//    if (v_texture_) glDeleteTextures(1, &v_texture_);
+//    if (done_) return;
+//    done_ = true;
+//    frame_queue_.Stop();
+//    if (thread_.joinable()) {
+//        thread_.join();
+//    }
+//    ReleaseGl();
+//}
+//
+//void OpenGLRenderer::handle(const Message &msg) {
+//    switch(msg.what) {
+//        case kWhatQueueBuffer: {
+//            auto frame = std::any_cast<std::shared_ptr<MediaFrame>>(msg.obj);
+//            frame_queue_.Push(frame);
+//            break;
+//        }
+//    }
+//}
+//
+//void OpenGLRenderer::Run() {
+//    if (egl_env_.Init() != HpcStatus::kOk) return;
+//    if (egl_env_.CreateSurface(window_) != HpcStatus::kOk) return;
+//    if (egl_env_.MakeCurrent() != HpcStatus::kOk) return;
+//    if (SetupShaders() != HpcStatus::kOk) return;
+//
+//    while (!done_) {
+//        auto frame = frame_queue_.Pop(10);
+//        if (!frame) continue;
+//
+//        auto video_pts = frame->pts;
+//        auto audio_pts = clock_->GetPts();
+//        auto delay = video_pts - audio_pts;
+//
+//        if (delay > 0) {
+//            av_usleep(delay);
+//        }
+//
+//        if (SetupTextures(frame) != HpcStatus::kOk) {
+//            LOG_E("Failed to setup textures.");
+//            continue;
+//        }
+//
+//        Draw();
+//        egl_env_.SwapBuffers();
+//    }
 //}
 //
 //HpcStatus OpenGLRenderer::SetupShaders() {
@@ -159,4 +191,12 @@
 //    glUniform1i(v_sampler_location_, 2);
 //
 //    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+//}
+//
+//void OpenGLRenderer::ReleaseGl() {
+//    egl_env_.Release();
+//    shader_.Release();
+//    if (y_texture_) glDeleteTextures(1, &y_texture_);
+//    if (u_texture_) glDeleteTextures(1, &u_texture_);
+//    if (v_texture_) glDeleteTextures(1, &v_texture_);
 //}

@@ -35,7 +35,7 @@ void MediaCodecVideoDecoder::onMessageReceived(const Message& msg) {
         case kWhatSetExtractor: 
             doSetExtractor(std::static_pointer_cast<Extractor>(msg.obj)); 
             break;
-        case kWhatStart: 
+        case kWhatStart:
             doStart(); 
             break;
         case kWhatStop: 
@@ -84,7 +84,7 @@ void MediaCodecVideoDecoder::doConfigure(const std::shared_ptr<MediaFormat>& for
 }
 
 void MediaCodecVideoDecoder::doSetRenderer(const std::shared_ptr<Renderer>& renderer) {
-    renderer_ = renderer;
+    videoRenderer = renderer;
 }
 
 void MediaCodecVideoDecoder::doSetExtractor(const std::shared_ptr<Extractor>& extractor) {
@@ -120,10 +120,8 @@ void MediaCodecVideoDecoder::doFlush() {
     if (codec && codecStarted) {
         AMediaCodec_flush(codec);
     }
-    frameQueue.flush();
     pendingSample = nullptr;
     isInputEosQueued = false;
-    // Restart input processing after flush
     doRequestInputBuffers();
 }
 
@@ -173,14 +171,21 @@ void MediaCodecVideoDecoder::doRequestInputBuffers() {
         if (out_index >= 0) {
             output_available = true;
             if (info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) {
-                frameQueue.push(std::make_shared<MediaFrame>()); // EOS frame
+                // EOS frame
+                auto eos_frame = std::make_shared<MediaFrame>();
+                if (videoRenderer) {
+                    videoRenderer->queueBuffer(eos_frame);
+                }
                 break; // Stop draining on EOS
             } else {
                 auto out_frame = std::make_shared<MediaFrame>();
                 out_frame->pts = info.presentationTimeUs;
                 out_frame->index = out_index;
                 out_frame->codec = codec;
-                frameQueue.push(out_frame);
+                
+                if (videoRenderer) {
+                    videoRenderer->queueBuffer(out_frame);
+                }
             }
         } else if (out_index == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED) {
             auto format = AMediaCodec_getOutputFormat(codec);

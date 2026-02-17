@@ -4,8 +4,11 @@
 #include "common/Looper.h"
 #include "common/MediaClock.h"
 #include "common/MediaFrame.h"
+#include "common/HpcLog.h"
 #include <unistd.h>
 #include <thread>
+
+constexpr char kTag[] = "Renderer";
 
 Renderer::Renderer(std::string name) 
     : Handler(std::make_shared<Looper>(std::move(name))) 
@@ -27,6 +30,14 @@ void Renderer::setMediaClock(const std::shared_ptr<MediaClock>& clock) {
     sendMessage({.what = kWhatSetMediaClock, .obj = clock});
 }
 
+void Renderer::queueBuffer(const std::shared_ptr<MediaFrame> frame) {
+    frameQueue.push(frame);
+    if (isFirstFrame) {
+        isFirstFrame = false;
+        sendMessage({.what = kWhatConsume});
+    }
+}
+
 void Renderer::start() {
     resume();
 }
@@ -38,6 +49,7 @@ void Renderer::stop() {
 
 void Renderer::flush() {
     isFlushing = true;
+    frameQueue.flush();
     sendMessage({kWhatFlush});
 }
 
@@ -70,11 +82,12 @@ bool Renderer::syncFrame(const std::shared_ptr<MediaFrame>& frame) {
     }
 
     int64_t frameTimeUs = frame->pts;
-    
+
     // Thresholds
     const int64_t kMinEarlyUs = 30000; // 30ms
     const int64_t kMaxLateUs = -30000; // -30ms
     const int64_t kDropLateUs = -500000; // -500ms (Drop if very late)
+    const int64_t kMaxEarlyUs = 1000000;
 
     int64_t lastClockUs = mediaClock->getPositionUs();
     int stuckCount = 0;
@@ -91,6 +104,8 @@ bool Renderer::syncFrame(const std::shared_ptr<MediaFrame>& frame) {
         int64_t clockTimeUs = mediaClock->getPositionUs();
         int64_t earlyUs = frameTimeUs - clockTimeUs;
 
+        LOG_E("earlyUs: %lld, clockTimeUs: %lld frameTimeUs %lld", earlyUs, clockTimeUs,frameTimeUs);
+
         if (earlyUs > kMinEarlyUs) {
             // Check if clock is stuck
             if (clockTimeUs == lastClockUs) {
@@ -106,6 +121,9 @@ bool Renderer::syncFrame(const std::shared_ptr<MediaFrame>& frame) {
 
             // Too early, wait
             int64_t waitUs = earlyUs - 10000; // Wake up 10ms early
+            if (waitUs > kMaxEarlyUs) {
+                return false;
+            }
             if (waitUs > 10000) {
                 // Sleep in chunks to check for pause
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -114,13 +132,13 @@ bool Renderer::syncFrame(const std::shared_ptr<MediaFrame>& frame) {
                 std::this_thread::sleep_for(std::chrono::microseconds(waitUs));
             }
             return true;
-        } else if (earlyUs < kDropLateUs) {
+        } else if (earlyUs < 0) {
             // Way too late, drop it to catch up
             return false;
         } else if (earlyUs < kMaxLateUs) {
-            // Late, but maybe still worth showing? 
+            // Late, but maybe still worth showing?
             // For now, let's drop to keep sync tight.
-            return false; 
+            return false;
         } else {
             // On time
             return true;

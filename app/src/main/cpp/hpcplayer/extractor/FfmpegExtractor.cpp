@@ -287,7 +287,7 @@ void FfmpegExtractor::doSeekTo(int64_t msec) {
         av_bsf_flush(bsfContext);
     }
     isSeek = true;
-    postReadBuffer(); 
+    postReadBuffer();
 }
 
 void FfmpegExtractor::doReadBuffer() {
@@ -314,6 +314,7 @@ void FfmpegExtractor::doReadBuffer() {
                     memcpy(sample->data.data(), packet->data, packet->size);
                     sample->pts = av_rescale_q(packet->pts, formatContext->streams[packet->stream_index]->time_base, {1, 1000000});
                     videoPacketQueue.push(sample);
+                    LOG_E("videoPacketQueue %d",videoPacketQueue.size());
                     av_packet_unref(packet);
                 }
             } else {
@@ -333,6 +334,7 @@ void FfmpegExtractor::doReadBuffer() {
                 isSeek = false;
             }
             audioPacketQueue.push(sample);
+            LOG_E("audioPacketQueue %d",audioPacketQueue.size());
         }
         av_packet_unref(packet);
         postReadBuffer(); 

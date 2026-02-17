@@ -10,7 +10,6 @@ constexpr char kTag[] = "AudioOpenSLESRenderer";
 constexpr int kPcm16BitBytes = 2;
 
 AudioOpenSLESRenderer::AudioOpenSLESRenderer() : Renderer("AudioOpenSLESRenderer") {
-
 }
 
 AudioOpenSLESRenderer::~AudioOpenSLESRenderer() {
@@ -21,10 +20,6 @@ void AudioOpenSLESRenderer::init() {
     createEngine();
     createOutputMix();
     createPlayer(mediaFormat->sample_rate, mediaFormat->channels);
-    bytesPerSecond = mediaFormat->sample_rate * mediaFormat->channels * kPcm16BitBytes;
-    if (bytesPerSecond == 0) {
-        bytesPerSecond = 1; // Avoid division by zero
-    }
 }
 
 int64_t AudioOpenSLESRenderer::getCurrentPosition() {
@@ -55,7 +50,11 @@ void AudioOpenSLESRenderer::onMessageReceived(const Message& msg) {
             doFlush();
             break;
         case kWhatQueueBuffer:
-            doEnqueue();
+            frameQueue.push(std::static_pointer_cast<MediaFrame>(msg.obj));
+            sendMessage({kWhatConsume});
+            break;
+        case kWhatConsume:
+            notifyConsume(msg.arg1 == 1);
             break;
     }
 }
@@ -65,139 +64,156 @@ void AudioOpenSLESRenderer::doSetDecoder(const std::shared_ptr<Decoder>& decoder
 }
 
 void AudioOpenSLESRenderer::doDrainQueue() {
-    if (isPaused || !decoder) {
+    if (isPaused) {
         return;
     }
-    
-    // Trigger the first enqueue if the player is ready
-    if (playerBufferQueue) {
-        doEnqueue();
-    } else {
-        // If player not created yet, try to get a frame to create it
-        auto frame = decoder->getFrame();
-        if (frame) {
-            doRender(frame);
-        }
-    }
+    notifyConsume();
 }
 
 void AudioOpenSLESRenderer::doFlush() {
-    if (playerBufferQueue) (*playerBufferQueue)->Clear(playerBufferQueue);
-    playedBytes.store(0);
+    frameQueue.flush();
+
     {
-        std::lock_guard<std::mutex> lock(queueMutex);
-        std::queue<size_t> empty;
-        std::swap(pendingBufferSizes, empty);
+        std::lock_guard<std::mutex> lock(playerMutex);
+
+        // Stop the player to abort current playback and prevent further callbacks for old frames
+        if (playerPlay) {
+            (*playerPlay)->SetPlayState(playerPlay, SL_PLAYSTATE_STOPPED);
+        }
+
+        if (playerBufferQueue) {
+            (*playerBufferQueue)->Clear(playerBufferQueue);
+        }
+
+        // Do NOT clear bufferGraveyard here.
+        // We must keep old frames alive until the audio thread is definitely done with them.
+        // They will be cleared gradually in notifyConsume or fully in doRelease.
+
+        // Move currently rendering frames to graveyard to keep them alive
+        // until we are sure they are not used.
+        while(!renderingQueue.empty()) {
+            bufferGraveyard.push_back(renderingQueue.front());
+            renderingQueue.pop();
+        }
+
+        // Keep graveyard size manageable
+        while (bufferGraveyard.size() > 50) {
+            bufferGraveyard.erase(bufferGraveyard.begin());
+        }
+
+        pendingFrame = nullptr;
+
+        // Restore player state
+        if (playerPlay) {
+            if (isPaused) {
+                (*playerPlay)->SetPlayState(playerPlay, SL_PLAYSTATE_PAUSED);
+            } else {
+                (*playerPlay)->SetPlayState(playerPlay, SL_PLAYSTATE_PLAYING);
+            }
+        }
     }
-    isFlushing = false;
+
+    isFirstFrame = true;
     firstFrameAfterFlush = true;
     startPts = -1;
     currentPositionUs = 0;
+    isFlushing = false;
 }
 
-bool AudioOpenSLESRenderer::ensurePlayerInitialized(int sampleRate, int channels) {
-    if (!playerObject) {
+bool AudioOpenSLESRenderer::doRender(const std::shared_ptr<MediaFrame>& frame) {
+    if (isFlushing) {
         return false;
     }
-    return true;
-}
-
-void AudioOpenSLESRenderer::doRender(const std::shared_ptr<MediaFrame>& frame) {
     if (!frame || !frame->data || frame->size == 0) {
-        return;
+        return false;
     }
-    
+    LOG_E("doRender");
     std::lock_guard<std::mutex> lock(playerMutex);
 
-    if (!ensurePlayerInitialized(frame->sample_rate, frame->channels)) {
-        return;
+    if (!playerObject) {
+        LOG_E("Player not initialized, dropping frame.");
+        return false;
     }
-    
-    // Store the frame so we can enqueue it
-    currentFrame = frame;
-    
-    // Initial enqueue
+
     if (playerBufferQueue) {
         SLresult result = (*playerBufferQueue)->Enqueue(playerBufferQueue, frame->data.get(), frame->size);
         if (result == SL_RESULT_SUCCESS) {
-            {
-                std::lock_guard<std::mutex> qLock(queueMutex);
-                pendingBufferSizes.push(frame->size);
-            }
-
-            if (startPts == -1) {
+            if (startPts == -1 || frame->is_seek_frame) {
                 startPts = frame->pts;
-                currentPositionUs = startPts;
             }
+            renderingQueue.push(frame);
+            return true;
+        } else {
+            LOG_E("Failed to enqueue audio buffer: %d", result);
+            return false;
         }
     }
+    return false;
 }
 
-void AudioOpenSLESRenderer::doEnqueue() {
-    if (isPaused || !decoder) {
+void AudioOpenSLESRenderer::notifyConsume(bool fromCallback) {
+    {
+        std::lock_guard<std::mutex> lock(playerMutex);
+        if (fromCallback && !renderingQueue.empty()) {
+             auto frame = renderingQueue.front();
+             renderingQueue.pop();
+             bufferGraveyard.push_back(frame);
+
+             while (bufferGraveyard.size() > 50) {
+                bufferGraveyard.erase(bufferGraveyard.begin());
+             }
+        }
+
+        // Defensive cleanup: if renderingQueue grows too large, force clear it
+        while (renderingQueue.size() > 200) {
+            LOG_E("Rendering queue too large, force clearing!");
+            renderingQueue.pop();
+        }
+    }
+
+    if (isPaused) {
         return;
     }
 
-    auto frame = decoder->getFrame();
-    if (frame) {
-        if (!frame->data || frame->size == 0) {
-            // Skip invalid frames and try next
-            sendMessage({kWhatQueueBuffer});
-            return;
+    int processedCount = 0;
+    const int kMaxProcessPerLoop = 10;
+
+    // Try to fill the OpenSLES queue
+    while (processedCount < kMaxProcessPerLoop) {
+        // If we have a pending frame that failed to enqueue previously, try it first
+        std::shared_ptr<MediaFrame> frameToRender = pendingFrame;
+        if (!frameToRender) {
+             auto currentFrame = frameQueue.tryPop();
+             if (currentFrame) {
+                 frameToRender = *currentFrame;
+             }
         }
 
-        std::lock_guard<std::mutex> lock(playerMutex);
-        
-        if (!ensurePlayerInitialized(frame->sample_rate, frame->channels)) {
-            return;
+        if (!frameToRender) {
+            break;
         }
 
-        currentFrame = frame;
-
-        if (playerBufferQueue) {
-            SLresult result = (*playerBufferQueue)->Enqueue(playerBufferQueue, frame->data.get(), frame->size);
-            if (result == SL_RESULT_SUCCESS) {
-                {
-                    std::lock_guard<std::mutex> qLock(queueMutex);
-                    pendingBufferSizes.push(frame->size);
-                }
-
-                if (startPts == -1 || frame->is_seek_frame) {
-                    startPts = frame->pts;
-                    currentPositionUs = startPts;
-                    // Reset played bytes counter for new seek segment if needed, 
-                    // but here we rely on startPts + playedBytes calculation.
-                    // If we seek, we should probably reset playedBytes logic or adjust startPts.
-                    // Since we flushed, playedBytes is 0.
-                }
-            }
+        LOG_E("notifyConsume %lld  size %d", frameToRender->pts,frameQueue.size());
+        if (!doRender(frameToRender)) {
+             // If render failed (e.g. queue full), save it as pending and stop.
+             pendingFrame = frameToRender;
+             break;
+        } else {
+             pendingFrame = nullptr;
+             processedCount++;
         }
+    }
+
+    // If we processed the max batch size and there might be more data, schedule another run
+    if (processedCount >= kMaxProcessPerLoop) {
+        sendMessage({kWhatConsume});
     }
 }
 
 void AudioOpenSLESRenderer::playerCallback(SLAndroidSimpleBufferQueueItf bq, void* context) {
     auto* renderer = static_cast<AudioOpenSLESRenderer*>(context);
-    
-    // Update position
-    size_t size = 0;
-    {
-        std::lock_guard<std::mutex> lock(renderer->queueMutex);
-        if (!renderer->pendingBufferSizes.empty()) {
-            size = renderer->pendingBufferSizes.front();
-            renderer->pendingBufferSizes.pop();
-        }
-    }
-    
-    if (size > 0) {
-        renderer->playedBytes.fetch_add(size, std::memory_order_relaxed);
-        int64_t bytes = renderer->playedBytes.load(std::memory_order_relaxed);
-        if (renderer->bytesPerSecond > 0) {
-            // Calculate microseconds: (bytes * 1000000) / bytesPerSecond
-            renderer->currentPositionUs = renderer->startPts + (bytes * 1000000) / renderer->bytesPerSecond;
-        }
-    }
-
-    renderer->sendMessage({kWhatQueueBuffer});
+    // arg1 = 1 indicates fromCallback = true
+    renderer->sendMessage({.what = kWhatConsume, .arg1 = 1});
 }
 
 void AudioOpenSLESRenderer::doPause() {
@@ -230,6 +246,10 @@ void AudioOpenSLESRenderer::doRelease() {
     outputMixObject = nullptr;
     engineObject = nullptr;
     engineEngine = nullptr;
+
+    while(!renderingQueue.empty()) renderingQueue.pop();
+    bufferGraveyard.clear();
+    pendingFrame = nullptr;
 }
 
 void AudioOpenSLESRenderer::createEngine() {
@@ -246,41 +266,41 @@ void AudioOpenSLESRenderer::createOutputMix() {
 }
 
 bool AudioOpenSLESRenderer::createPlayer(int sampleRate, int channels) {
-    if (!engineEngine) return false;
+    if (!engineEngine || !outputMixObject) return false;
 
     SLDataLocator_AndroidSimpleBufferQueue locBufq = {SL_DATALOCATOR_ANDROIDSIMPLEBUFFERQUEUE, 2};
     SLDataFormat_PCM formatPcm = {
             SL_DATAFORMAT_PCM, static_cast<SLuint32>(channels), static_cast<SLuint32>(sampleRate * 1000),
-        SL_PCMSAMPLEFORMAT_FIXED_16, SL_PCMSAMPLEFORMAT_FIXED_16,
-        static_cast<SLuint32>((channels == 2) ? (SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT) : SL_SPEAKER_FRONT_CENTER),
-        SL_BYTEORDER_LITTLEENDIAN
+            SL_PCMSAMPLEFORMAT_FIXED_16, SL_PCMSAMPLEFORMAT_FIXED_16,
+            static_cast<SLuint32>((channels == 2) ? (SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT) : SL_SPEAKER_FRONT_CENTER),
+            SL_BYTEORDER_LITTLEENDIAN
     };
     SLDataSource audioSrc = {&locBufq, &formatPcm};
     SLDataLocator_OutputMix locOutmix = {SL_DATALOCATOR_OUTPUTMIX, outputMixObject};
     SLDataSink audioSnk = {&locOutmix, nullptr};
-    const SLInterfaceID ids[] = {SL_IID_BUFFERQUEUE, SL_IID_PLAY};
-    const SLboolean req[] = {SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE};
-    
-    if ((*engineEngine)->CreateAudioPlayer(engineEngine, &playerObject, &audioSrc, &audioSnk, 2, ids, req) != SL_RESULT_SUCCESS) {
+    const SLInterfaceID ids[] = {SL_IID_BUFFERQUEUE, SL_IID_PLAY, SL_IID_VOLUME};
+    const SLboolean req[] = {SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE};
+
+    if ((*engineEngine)->CreateAudioPlayer(engineEngine, &playerObject, &audioSrc, &audioSnk, 3, ids, req) != SL_RESULT_SUCCESS) {
         LOG_E("Failed to create audio player");
         return false;
     }
-    
+
     if ((*playerObject)->Realize(playerObject, SL_BOOLEAN_FALSE) != SL_RESULT_SUCCESS) {
         LOG_E("Failed to realize audio player");
         return false;
     }
-    
+
     if ((*playerObject)->GetInterface(playerObject, SL_IID_PLAY, &playerPlay) != SL_RESULT_SUCCESS) {
         LOG_E("Failed to get play interface");
         return false;
     }
-    
+
     if ((*playerObject)->GetInterface(playerObject, SL_IID_BUFFERQUEUE, &playerBufferQueue) != SL_RESULT_SUCCESS) {
         LOG_E("Failed to get buffer queue interface");
         return false;
     }
-    
+
     if (!playerBufferQueue) {
         LOG_E("Player buffer queue is null");
         return false;
@@ -290,7 +310,7 @@ bool AudioOpenSLESRenderer::createPlayer(int sampleRate, int channels) {
         LOG_E("Failed to register callback");
         return false;
     }
-    
+
     if (isPaused) {
         (*playerPlay)->SetPlayState(playerPlay, SL_PLAYSTATE_PAUSED);
     } else {

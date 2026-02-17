@@ -2,6 +2,7 @@
 #define HPC_PLAYER_RENDERER_RENDERER_H_
 
 #include "common/Handler.h"
+#include "common/DataQueue.h"
 #include <memory>
 #include <atomic>
 
@@ -19,6 +20,7 @@ public:
     void setDecoder(const std::shared_ptr<Decoder>& decoder);
     void setMediaClock(const std::shared_ptr<MediaClock>& clock);
     void setMediaFormat(const std::shared_ptr<MediaFormat>& format) {mediaFormat = format;}
+    void queueBuffer(const std::shared_ptr<MediaFrame>);
     void start();
     void stop();
     void flush();
@@ -44,6 +46,7 @@ protected:
         kWhatResume              = 'resm',
         kWhatSetDecoder          = 'setD',
         kWhatSetMediaClock       = 'setC',
+        kWhatConsume             = 'conS'
     };
 
     std::shared_ptr<Decoder> decoder;
@@ -52,6 +55,9 @@ protected:
     std::atomic<bool> isFlushing{false};
     std::atomic<bool> firstFrameAfterFlush{true};
     std::shared_ptr<MediaFormat> mediaFormat;
+    DataQueue<std::shared_ptr<MediaFrame>> frameQueue {INT32_MAX};
+
+    std::atomic<bool> isFirstFrame{true};
 };
 
 #endif // HPC_PLAYER_RENDERER_RENDERER_H_

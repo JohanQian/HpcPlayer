@@ -17,15 +17,21 @@ FfmpegVideoDecoder::~FfmpegVideoDecoder() {
 
 void FfmpegVideoDecoder::onMessageReceived(const Message& msg) {
     switch (msg.what) {
-        case kWhatConfigure:
-            doConfigure(std::static_pointer_cast<MediaFormat>(msg.obj));
+        case kWhatConfigure: {
+            auto format = std::static_pointer_cast<MediaFormat>(msg.obj);
+            doConfigure(format);
             break;
-        case kWhatSetRenderer:
-            doSetRenderer(std::static_pointer_cast<Renderer>(msg.obj));
+        }
+        case kWhatSetRenderer: {
+            auto renderer = std::static_pointer_cast<Renderer>(msg.obj);
+            doSetRenderer(renderer);
             break;
-        case kWhatSetExtractor:
-            doSetExtractor(std::static_pointer_cast<Extractor>(msg.obj));
+        }
+        case kWhatSetExtractor: {
+            auto extractor = std::static_pointer_cast<Extractor>(msg.obj);
+            doSetExtractor(extractor);
             break;
+        }
         case kWhatStart:
             doStart();
             break;
@@ -71,7 +77,7 @@ void FfmpegVideoDecoder::doConfigure(const std::shared_ptr<MediaFormat>& format)
 }
 
 void FfmpegVideoDecoder::doSetRenderer(const std::shared_ptr<Renderer>& renderer) {
-    renderer_ = renderer;
+    videoRenderer = renderer;
 }
 
 void FfmpegVideoDecoder::doSetExtractor(const std::shared_ptr<Extractor>& extractor) {
@@ -104,7 +110,6 @@ void FfmpegVideoDecoder::doFlush() {
     if (codecContext) {
         avcodec_flush_buffers(codecContext);
     }
-    frameQueue.flush();
 }
 
 void FfmpegVideoDecoder::doRequestInputBuffers() {
@@ -137,7 +142,10 @@ void FfmpegVideoDecoder::doRequestInputBuffers() {
         video_frame->pts = avFrame->pts;
         // The actual frame data conversion would happen here
         // For now just pushing empty frame or placeholder
-        frameQueue.push(video_frame);
+        
+        if (videoRenderer) {
+            videoRenderer->queueBuffer(video_frame);
+        }
     }
 
     if (!sample->is_eos) {

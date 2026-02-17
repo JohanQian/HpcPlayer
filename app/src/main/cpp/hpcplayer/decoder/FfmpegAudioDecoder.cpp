@@ -47,6 +47,7 @@ void FfmpegAudioDecoder::onMessageReceived(const Message& msg) {
 }
 
 void FfmpegAudioDecoder::doConfigure(const std::shared_ptr<MediaFormat>& format) {
+    doStop();
     const AVCodec* codec = avcodec_find_decoder(static_cast<AVCodecID>(format->codec_id));
     if (!codec) {
         LOG_E("Failed to find audio decoder");
@@ -82,7 +83,7 @@ void FfmpegAudioDecoder::doConfigure(const std::shared_ptr<MediaFormat>& format)
 }
 
 void FfmpegAudioDecoder::doSetRenderer(const std::shared_ptr<Renderer>& renderer) {
-    renderer_ = renderer;
+    audioRenderer = renderer;
 }
 
 void FfmpegAudioDecoder::doSetExtractor(const std::shared_ptr<Extractor>& extractor) {
@@ -115,16 +116,19 @@ void FfmpegAudioDecoder::doFlush() {
     if (codecContext) {
         avcodec_flush_buffers(codecContext);
     }
-    frameQueue.flush();
+    if (avFrame) {
+        av_frame_unref(avFrame);
+    }
 }
 
 void FfmpegAudioDecoder::doRequestInputBuffers() {
 
-    if (!extractor_) {
+    if (!extractor_ || !codecContext || !avFrame) {
         return;
     }
 
     auto sample = extractor_->getSample(MediaType::AUDIO);
+    LOG_E("extractor_->getSample");
     if (!sample) {
         return;
     }
@@ -159,7 +163,7 @@ void FfmpegAudioDecoder::doRequestInputBuffers() {
             LOG_E("Error during decoding");
             break;
         }
-
+        LOG_E("avcodec_receive_frame");
         int dst_nb_samples = av_rescale_rnd(swr_get_delay(swrContext, codecContext->sample_rate) +
                                             avFrame->nb_samples, targetSampleRate, codecContext->sample_rate, AV_ROUND_UP);
         
@@ -179,10 +183,15 @@ void FfmpegAudioDecoder::doRequestInputBuffers() {
              LOG_E("Error converting audio");
              continue;
         }
-        
+        LOG_E("avcodec_receive_frame2222222");
         audio_frame->size = av_samples_get_buffer_size(nullptr, audio_frame->channels, converted_samples, targetSampleFmt, 1);
         audio_frame->is_seek_frame = sample->is_seek_frame;
-        frameQueue.push(audio_frame);
+        
+        // Directly queue the buffer to the renderer
+        if (audioRenderer) {
+            audioRenderer->queueBuffer(audio_frame);
+            LOG_E("extractor_->queueBuffer");
+        }
     }
 
     if (!sample->is_eos) {

@@ -42,7 +42,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private TextView totalTimeText;
     private TextView videoTitleText;
 
-    private String[] videoPaths = {"/sdcard/VideoEditor/1080_1VNNOX.mp4","/sdcard/VideoEditor/1080_1VNNOX.mp4"};
+    private String[] videoPaths = {"/sdcard/VideoEditor/4K.mp4","/sdcard/VideoEditor/1080_1VNNOX.mp4"};
     private int currentVideoIndex = 0;
     private boolean isSurfaceReady = false;
     private boolean isPlaying = false;
