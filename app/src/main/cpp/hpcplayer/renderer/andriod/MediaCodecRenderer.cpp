@@ -78,7 +78,7 @@ void MediaCodecRenderer::doQueueBuffer(const std::shared_ptr<MediaFrame>& frame)
 }
 
 void MediaCodecRenderer::notifyConsume() {
-    if (isPaused || !decoder) {
+    if (isPaused || decoder.expired()) {
         return;
     }
 

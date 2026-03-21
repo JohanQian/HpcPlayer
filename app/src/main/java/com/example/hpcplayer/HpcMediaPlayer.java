@@ -4,7 +4,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.Surface;
 
-public class HpcNativePlayer {
+public class HpcMediaPlayer {
 
     static {
         try {
@@ -22,7 +22,7 @@ public class HpcNativePlayer {
     private OnMessageListener listener;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
-    public HpcNativePlayer() {
+    public HpcMediaPlayer() {
         try {
             nativePlayerPtr = nativeInit();
             if (nativePlayerPtr != 0) {

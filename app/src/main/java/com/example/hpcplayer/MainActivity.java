@@ -27,7 +27,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private static final int MEDIA_PREPARED = 1;
     private static final int MEDIA_PLAYBACK_COMPLETE = 2;
 
-    private HpcNativePlayer hpcNativePlayer;
+    private HpcMediaPlayer hpcMediaPlayer;
     private SurfaceView surfaceView;
     private SurfaceHolder surfaceHolder;
     
@@ -53,9 +53,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private Runnable updateProgressRunnable = new Runnable() {
         @Override
         public void run() {
-            if (hpcNativePlayer != null && isPlaying && !isTracking) {
-                long current = hpcNativePlayer.getCurrentPosition();
-                long total = hpcNativePlayer.getDuration();
+            if (hpcMediaPlayer != null && isPlaying && !isTracking) {
+                long current = hpcMediaPlayer.getCurrentPosition();
+                long total = hpcMediaPlayer.getDuration();
                 
                 if (total > 0) {
                     int progress = (int) (current * 100 / total);
@@ -86,9 +86,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (hpcNativePlayer != null) {
-            hpcNativePlayer.release();
+        if (hpcMediaPlayer != null) {
+            hpcMediaPlayer.stop();
+            hpcMediaPlayer.release();
+            hpcMediaPlayer = null;
         }
+        uiHandler.removeCallbacksAndMessages(null);
     }
 
     private void initViews() {
@@ -142,7 +145,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 if (fromUser) {
-                    long total = hpcNativePlayer.getDuration();
+                    long total = hpcMediaPlayer != null ? hpcMediaPlayer.getDuration() : 0;
                     long target = total * progress / 100;
                     currentTimeText.setText(formatTime(target));
                 }
@@ -156,10 +159,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {
                 isTracking = false;
-                if (hpcNativePlayer != null) {
-                    long total = hpcNativePlayer.getDuration();
+                if (hpcMediaPlayer != null) {
+                    long total = hpcMediaPlayer.getDuration();
                     long target = total * seekBar.getProgress() / 100;
-                    hpcNativePlayer.seekTo(target);
+                    hpcMediaPlayer.seekTo(target);
                     // Update UI immediately after seek
                     currentTimeText.setText(formatTime(target));
                 }
@@ -168,14 +171,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     private void initPlayer() {
-        hpcNativePlayer = new HpcNativePlayer();
-        hpcNativePlayer.setOnMessageListener((msg, ext1, ext2) -> {
+        hpcMediaPlayer = new HpcMediaPlayer();
+        hpcMediaPlayer.setOnMessageListener((msg, ext1, ext2) -> {
             // Handle native messages
             switch (msg) {
                 case MEDIA_PREPARED:
                     // Logic 1: MEDIA_PREPARED以后在开始start播放视频
-                    if (hpcNativePlayer != null) {
-                        hpcNativePlayer.start();
+                    if (hpcMediaPlayer != null) {
+                        hpcMediaPlayer.start();
                         isPlaying = true;
                         updatePlayPauseIcon();
                         uiHandler.post(updateProgressRunnable);
@@ -193,10 +196,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     private void togglePlayPause() {
-        if (hpcNativePlayer == null) return;
+        if (hpcMediaPlayer == null) return;
 
         if (isPlaying) {
-            hpcNativePlayer.pause();
+            hpcMediaPlayer.pause();
             isPlaying = false;
             updatePlayPauseIcon();
             uiHandler.removeCallbacks(updateProgressRunnable);
@@ -206,7 +209,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             if (!isVideoLoaded) {
                 playVideo();
             } else {
-                hpcNativePlayer.start();
+                hpcMediaPlayer.start();
                 isPlaying = true;
                 updatePlayPauseIcon();
                 uiHandler.post(updateProgressRunnable);
@@ -226,23 +229,30 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             return;
         }
 
+        uiHandler.removeCallbacks(updateProgressRunnable);
+        isPlaying = false;
+        isVideoLoaded = false;
+        
+        // Stop and release the existing player instance, then re-initialize
+        if (hpcMediaPlayer != null) {
+            hpcMediaPlayer.stop();
+            hpcMediaPlayer.setOnMessageListener(null);
+            hpcMediaPlayer.release();
+            hpcMediaPlayer = null;
+        }
+        initPlayer();
         
         // Reset UI
         seekBar.setProgress(0);
         currentTimeText.setText("00:00");
         totalTimeText.setText("00:00");
         videoTitleText.setText(new File(videoPaths[currentVideoIndex]).getName());
+        updatePlayPauseIcon();
 
         // Setup and start new video
-        hpcNativePlayer.setDataSource(videoPaths[currentVideoIndex]);
-        hpcNativePlayer.setSurface(surfaceHolder.getSurface());
-        hpcNativePlayer.prepare();
-        
-        isVideoLoaded = true;
-        // isPlaying will be set to true in MEDIA_PREPARED handler
-        isPlaying = false; 
-        updatePlayPauseIcon();
-        uiHandler.removeCallbacks(updateProgressRunnable);
+        hpcMediaPlayer.setDataSource(videoPaths[currentVideoIndex]);
+        hpcMediaPlayer.setSurface(surfaceHolder.getSurface());
+        hpcMediaPlayer.prepare();
     }
 
     private String formatTime(long millis) {
@@ -273,8 +283,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         surfaceHolder = holder;
         isSurfaceReady = true;
         // Auto-play first video if permissions granted
-        if (hasPermissions()) {
+        if (hasPermissions() && !isVideoLoaded) {
              playVideo();
+        } else if (hpcMediaPlayer != null && isVideoLoaded) {
+             hpcMediaPlayer.setSurface(holder.getSurface());
         }
     }
 
@@ -285,12 +297,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     @Override
     public void surfaceDestroyed(SurfaceHolder holder) {
         isSurfaceReady = false;
-        isPlaying = false;
-        isVideoLoaded = false;
-        uiHandler.removeCallbacks(updateProgressRunnable);
-        if (hpcNativePlayer != null) {
-            hpcNativePlayer.release();
-            hpcNativePlayer = null;
+        if (hpcMediaPlayer != null) {
+            hpcMediaPlayer.setSurface(null);
         }
     }
 

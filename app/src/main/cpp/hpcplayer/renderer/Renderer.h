@@ -49,7 +49,7 @@ protected:
         kWhatConsume             = 'conS'
     };
 
-    std::shared_ptr<Decoder> decoder;
+    std::weak_ptr<Decoder> decoder;
     std::shared_ptr<MediaClock> mediaClock;
     std::atomic<bool> isPaused{true};
     std::atomic<bool> isFlushing{false};

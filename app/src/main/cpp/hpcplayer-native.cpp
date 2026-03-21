@@ -22,8 +22,8 @@ public:
 
 private:
     JNIHpcPlayerListener();
-    jclass      mClass;     // Reference to HpcNativePlayer class
-    jobject     mObject;    // Weak ref to HpcNativePlayer Java object to call on
+    jclass      mClass;     // Reference to HpcMediaPlayer class
+    jobject     mObject;    // Weak ref to HpcMediaPlayer Java object to call on
     JavaVM*     mJavaVM;    // Java VM to attach thread
 };
 
@@ -80,7 +80,7 @@ void JNIHpcPlayerListener::notify(int msg, int ext1, int ext2, const void *obj) 
 extern "C" {
 
 JNIEXPORT jlong JNICALL
-Java_com_example_hpcplayer_HpcNativePlayer_nativeInit(JNIEnv* env, jobject thiz) {
+Java_com_example_hpcplayer_HpcMediaPlayer_nativeInit(JNIEnv* env, jobject thiz) {
     // Create HpcPlayer using create() which returns a shared_ptr
     auto player = HpcPlayer::create();
     // Store the shared_ptr on the heap so it persists
@@ -89,7 +89,7 @@ Java_com_example_hpcplayer_HpcNativePlayer_nativeInit(JNIEnv* env, jobject thiz)
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_hpcplayer_HpcNativePlayer_nativeSetupListener(JNIEnv* env, jobject thiz, jlong player_ptr) {
+Java_com_example_hpcplayer_HpcMediaPlayer_nativeSetupListener(JNIEnv* env, jobject thiz, jlong player_ptr) {
     if (auto player = FromLong(player_ptr)) {
         auto listener = std::make_shared<JNIHpcPlayerListener>(env, thiz, thiz);
         player->setListener(listener);
@@ -97,7 +97,7 @@ Java_com_example_hpcplayer_HpcNativePlayer_nativeSetupListener(JNIEnv* env, jobj
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_hpcplayer_HpcNativePlayer_nativeRelease(JNIEnv* env, jobject thiz, jlong player_ptr) {
+Java_com_example_hpcplayer_HpcMediaPlayer_nativeRelease(JNIEnv* env, jobject thiz, jlong player_ptr) {
     auto* ptr = reinterpret_cast<std::shared_ptr<HpcPlayer>*>(player_ptr);
     if (ptr) {
         delete ptr; // This will decrement the ref count and potentially destroy the player
@@ -105,7 +105,7 @@ Java_com_example_hpcplayer_HpcNativePlayer_nativeRelease(JNIEnv* env, jobject th
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_hpcplayer_HpcNativePlayer_nativeSetDataSource(JNIEnv* env, jobject thiz, jlong player_ptr, jstring path) {
+Java_com_example_hpcplayer_HpcMediaPlayer_nativeSetDataSource(JNIEnv* env, jobject thiz, jlong player_ptr, jstring path) {
     if (auto player = FromLong(player_ptr)) {
         const char* c_path = env->GetStringUTFChars(path, nullptr);
         player->setDataSource(c_path);
@@ -114,7 +114,7 @@ Java_com_example_hpcplayer_HpcNativePlayer_nativeSetDataSource(JNIEnv* env, jobj
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_hpcplayer_HpcNativePlayer_nativeSetSurface(JNIEnv* env, jobject thiz, jlong player_ptr, jobject surface) {
+Java_com_example_hpcplayer_HpcMediaPlayer_nativeSetSurface(JNIEnv* env, jobject thiz, jlong player_ptr, jobject surface) {
     if (auto player = FromLong(player_ptr)) {
         ANativeWindow* window = nullptr;
         if (surface != nullptr) {
@@ -130,49 +130,49 @@ Java_com_example_hpcplayer_HpcNativePlayer_nativeSetSurface(JNIEnv* env, jobject
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_hpcplayer_HpcNativePlayer_nativePrepare(JNIEnv* env, jobject thiz, jlong player_ptr) {
+Java_com_example_hpcplayer_HpcMediaPlayer_nativePrepare(JNIEnv* env, jobject thiz, jlong player_ptr) {
     if (auto player = FromLong(player_ptr)) {
         player->prepareAsync();
     }
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_hpcplayer_HpcNativePlayer_nativeStart(JNIEnv* env, jobject thiz, jlong player_ptr) {
+Java_com_example_hpcplayer_HpcMediaPlayer_nativeStart(JNIEnv* env, jobject thiz, jlong player_ptr) {
     if (auto player = FromLong(player_ptr)) {
         player->start();
     }
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_hpcplayer_HpcNativePlayer_nativeResume(JNIEnv* env, jobject thiz, jlong player_ptr) {
+Java_com_example_hpcplayer_HpcMediaPlayer_nativeResume(JNIEnv* env, jobject thiz, jlong player_ptr) {
     if (auto player = FromLong(player_ptr)) {
         player->resume();
     }
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_hpcplayer_HpcNativePlayer_nativePause(JNIEnv* env, jobject thiz, jlong player_ptr) {
+Java_com_example_hpcplayer_HpcMediaPlayer_nativePause(JNIEnv* env, jobject thiz, jlong player_ptr) {
     if (auto player = FromLong(player_ptr)) {
         player->pause();
     }
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_hpcplayer_HpcNativePlayer_nativeStop(JNIEnv *env, jobject thiz, jlong player_ptr) {
+Java_com_example_hpcplayer_HpcMediaPlayer_nativeStop(JNIEnv *env, jobject thiz, jlong player_ptr) {
     if (auto player = FromLong(player_ptr)) {
         player->stop();
     }
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_hpcplayer_HpcNativePlayer_nativeSeekTo(JNIEnv* env, jobject thiz, jlong player_ptr, jlong msec) {
+Java_com_example_hpcplayer_HpcMediaPlayer_nativeSeekTo(JNIEnv* env, jobject thiz, jlong player_ptr, jlong msec) {
     if (auto player = FromLong(player_ptr)) {
         player->seekTo(msec);
     }
 }
 
 JNIEXPORT jlong JNICALL
-Java_com_example_hpcplayer_HpcNativePlayer_nativeGetDuration(JNIEnv* env, jobject thiz, jlong player_ptr) {
+Java_com_example_hpcplayer_HpcMediaPlayer_nativeGetDuration(JNIEnv* env, jobject thiz, jlong player_ptr) {
     if (auto player = FromLong(player_ptr)) {
         return player->getDuration();
     }
@@ -180,7 +180,7 @@ Java_com_example_hpcplayer_HpcNativePlayer_nativeGetDuration(JNIEnv* env, jobjec
 }
 
 JNIEXPORT jlong JNICALL
-Java_com_example_hpcplayer_HpcNativePlayer_nativeGetCurrentPosition(JNIEnv* env, jobject thiz, jlong player_ptr) {
+Java_com_example_hpcplayer_HpcMediaPlayer_nativeGetCurrentPosition(JNIEnv* env, jobject thiz, jlong player_ptr) {
     if (auto player = FromLong(player_ptr)) {
         return player->getCurrentPosition();
     }
