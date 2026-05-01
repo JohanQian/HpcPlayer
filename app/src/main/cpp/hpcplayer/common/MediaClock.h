@@ -5,6 +5,8 @@
 #include <mutex>
 #include <atomic>
 
+namespace hpc {
+
 class MediaClock {
 public:
     MediaClock();
@@ -32,3 +34,5 @@ private:
     
     std::mutex mutex;
 };
+
+} // namespace hpc

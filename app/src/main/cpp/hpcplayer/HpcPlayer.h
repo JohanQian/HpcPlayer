@@ -13,8 +13,9 @@
 #include "common/Message.h"
 #include "../HpcPlayerInterface.h"
 
-// Forward-declare ANativeWindow
-struct ANativeWindow;
+#include "renderer/andriod/NativeWindow.h"
+
+namespace hpc {
 
 class HpcPlayer final : public HpcPlayerInterface, public std::enable_shared_from_this<HpcPlayer> {
 public:
@@ -22,7 +23,7 @@ public:
     ~HpcPlayer() override;
 
     void setDataSource(const char* path) override;
-    void setSurface(std::shared_ptr<ANativeWindow> window) override;
+    void setSurface(std::shared_ptr<NativeWindow> window, VideoRenderMode mode = VideoRenderMode::SurfaceTextureOes) override;
     void prepareAsync() override;
     void start() override;
     void resume() override;
@@ -76,5 +77,7 @@ private:
     
     // mListener and mNotifyLock are now in base class
 };
+
+} // namespace hpc
 
 #endif // HPC_PLAYER_HPC_PLAYER_H_

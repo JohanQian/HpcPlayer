@@ -4,7 +4,10 @@
 #include "renderer/Renderer.h"
 #include "common/Message.h"
 #include "common/MediaSample.h"
+#include "renderer/andriod/NativeWindow.h"
 #include <android/native_window.h>
+
+namespace hpc {
 
 namespace {
     constexpr char kTag[] = "MediaCodecVideoDecoder";
@@ -16,7 +19,7 @@ MediaCodecVideoDecoder::~MediaCodecVideoDecoder() {
     doStop();
 }
 
-void MediaCodecVideoDecoder::setNativeWindow(const std::shared_ptr<ANativeWindow>& window) {
+void MediaCodecVideoDecoder::setNativeWindow(const std::shared_ptr<NativeWindow>& window) {
     nativeWindow = window;
 }
 
@@ -74,7 +77,7 @@ void MediaCodecVideoDecoder::doConfigure(const std::shared_ptr<MediaFormat>& for
         AMediaFormat_setBuffer(media_format, "csd-0", (void*)format->extradata.data(), format->extradata.size());
     }
 
-    media_status_t status = AMediaCodec_configure(codec, media_format, nativeWindow.get(), nullptr, 0);
+    media_status_t status = AMediaCodec_configure(codec, media_format, nativeWindow ? nativeWindow->get() : nullptr, nullptr, 0);
     if (status != AMEDIA_OK) {
         LOG_E("DoConfigure failed: AMediaCodec_configure returned status %d", status);
         AMediaCodec_delete(codec);
@@ -114,6 +117,8 @@ void MediaCodecVideoDecoder::doStop() {
         AMediaCodec_delete(codec);
         codec = nullptr;
     }
+    pendingSample = nullptr;
+    isInputEosQueued = false;
 }
 
 void MediaCodecVideoDecoder::doFlush() {
@@ -209,3 +214,5 @@ void MediaCodecVideoDecoder::doRequestInputBuffers() {
         sendMessage({kWhatRequestInputBuffers});
     }
 }
+
+} // namespace hpc

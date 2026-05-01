@@ -1,8 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 
 struct AMediaCodec;
+
+namespace hpc {
 
 struct MediaFrame {
     virtual ~MediaFrame() = default;
@@ -20,3 +23,5 @@ struct MediaFrame {
     int64_t render_time_ns = 0;
     bool is_seek_frame = false;
 };
+
+} // namespace hpc

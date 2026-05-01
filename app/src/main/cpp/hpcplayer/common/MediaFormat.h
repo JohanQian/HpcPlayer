@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+namespace hpc {
+
 /**
  * @brief A C-style struct to hold media format information.
  * All members are public for direct access.
@@ -27,3 +29,5 @@ struct MediaFormat {
     // Using a vector for automatic memory management.
     std::vector<uint8_t> extradata;
 };
+
+} // namespace hpc

@@ -2,6 +2,7 @@ package com.example.hpcplayer;
 
 import android.os.Handler;
 import android.os.Looper;
+import android.graphics.SurfaceTexture;
 import android.view.Surface;
 
 public class HpcMediaPlayer {
@@ -21,6 +22,8 @@ public class HpcMediaPlayer {
     private long nativePlayerPtr;
     private OnMessageListener listener;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private Surface currentSurface;
+    private boolean tunnelMode;
 
     public HpcMediaPlayer() {
         try {
@@ -38,7 +41,7 @@ public class HpcMediaPlayer {
     private native void nativeSetupListener(long playerPtr);
     private native void nativeRelease(long playerPtr);
     private native void nativeSetDataSource(long playerPtr, String path);
-    private native void nativeSetSurface(long playerPtr, Surface surface);
+    private native void nativeSetSurface(long playerPtr, Surface surfaceObj, boolean tunnelMode);
     private native void nativePrepare(long playerPtr);
     private native void nativeStart(long playerPtr);
     private native void nativeResume(long playerPtr);
@@ -61,11 +64,25 @@ public class HpcMediaPlayer {
     }
 
     public void setSurface(Surface surface) {
+        setSurface(surface, tunnelMode);
+    }
+
+    public void setSurface(Surface surface, boolean tunnelMode) {
+        currentSurface = surface;
+        this.tunnelMode = tunnelMode;
         if (nativePlayerPtr != 0) {
             try {
-                nativeSetSurface(nativePlayerPtr, surface);
+                nativeSetSurface(nativePlayerPtr, surface, tunnelMode);
             } catch (UnsatisfiedLinkError e) { e.printStackTrace(); }
         }
+    }
+
+    public void setTunnelMode(boolean enabled) {
+        setSurface(currentSurface, enabled);
+    }
+
+    public boolean isTunnelMode() {
+        return tunnelMode;
     }
 
     public void prepare() {
@@ -144,6 +161,7 @@ public class HpcMediaPlayer {
                 nativeRelease(nativePlayerPtr);
             } catch (UnsatisfiedLinkError e) { e.printStackTrace(); }
             nativePlayerPtr = 0;
+            currentSurface = null;
         }
     }
 
@@ -153,6 +171,14 @@ public class HpcMediaPlayer {
             // Post to the main thread to ensure UI safety
             mainHandler.post(() -> listener.onMessage(msg, ext1, ext2));
         }
+    }
+
+    private static SurfaceTexture createSurfaceTexture(int textureId) {
+        return new SurfaceTexture(textureId);
+    }
+
+    private static Surface createSurface(SurfaceTexture surfaceTexture) {
+        return new Surface(surfaceTexture);
     }
 
     @Override

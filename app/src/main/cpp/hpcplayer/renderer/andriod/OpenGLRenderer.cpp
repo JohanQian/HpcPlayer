@@ -8,6 +8,8 @@
 //#include "libavutil/frame.h"
 //}
 //
+//namespace hpc {
+//
 //namespace {
 //    constexpr char kTag[] = "OpenGLRenderer";
 //
@@ -195,8 +197,10 @@
 //
 //void OpenGLRenderer::ReleaseGl() {
 //    egl_env_.Release();
-//    shader_.Release();
+//    // shader_.Release(); // shader_ does not have Release() method
 //    if (y_texture_) glDeleteTextures(1, &y_texture_);
 //    if (u_texture_) glDeleteTextures(1, &u_texture_);
 //    if (v_texture_) glDeleteTextures(1, &v_texture_);
 //}
+//
+//} // namespace hpc

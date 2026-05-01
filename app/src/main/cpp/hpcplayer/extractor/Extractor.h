@@ -6,6 +6,8 @@
 #include <memory>
 #include <string>
 
+namespace hpc {
+
 class MediaFormat;
 
 enum class MediaType {
@@ -40,3 +42,5 @@ public:
 
     virtual void notifyPrepared(status_t err) = 0;
 };
+
+} // namespace hpc

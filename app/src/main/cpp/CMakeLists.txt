@@ -35,6 +35,9 @@ add_library( # Sets the name of the library.
         hpcplayer/renderer/andriod/OpenGLRenderer.cpp
         hpcplayer/renderer/andriod/MediaCodecRenderer.cpp
         hpcplayer/renderer/andriod/AudioOpenSLESRenderer.cpp
+        hpcplayer/renderer/andriod/NativeWindow.cpp
+        hpcplayer/renderer/andriod/SurfaceTextureRenderer.cpp
+        hpcplayer/renderer/andriod/EglEnv.cpp
         hpcplayer-native.cpp
         HpcPlayerInterface.cpp)
 

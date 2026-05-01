@@ -5,12 +5,16 @@ import android.app.Activity;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
-import android.view.SurfaceHolder;
-import android.view.SurfaceView;
+import android.graphics.SurfaceTexture;
+import android.view.Surface;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.ImageButton;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
@@ -19,36 +23,50 @@ import android.widget.Toast;
 import java.io.File;
 import java.util.Locale;
 
-public class MainActivity extends Activity implements SurfaceHolder.Callback {
+public class MainActivity extends Activity implements GLTextureView.OnSurfaceTextureCreatedListener {
 
     private static final int REQUEST_PERMISSIONS = 1;
+    private static final int SEEK_STEP_MS = 10000; // 10 seconds
 
     // Media Event Types (Must match native definition)
     private static final int MEDIA_PREPARED = 1;
     private static final int MEDIA_PLAYBACK_COMPLETE = 2;
 
     private HpcMediaPlayer hpcMediaPlayer;
-    private SurfaceView surfaceView;
-    private SurfaceHolder surfaceHolder;
-    
+    private GLTextureView textureView;
+    private SurfaceTexture surfaceTexture;
+    private Surface displaySurface;
+
     // UI Components
     private RelativeLayout controlPanel;
     private ImageButton centerPlayButton;
     private ImageButton playPauseButton;
     private ImageButton prevButton;
     private ImageButton nextButton;
+    private ImageButton rewindButton;
+    private ImageButton fastForwardButton;
+    private ImageButton volumeButton;
+    private ImageButton fullscreenButton;
+    private ImageButton settingsButton;
+    private ImageButton playlistButton;
     private SeekBar seekBar;
+    private SeekBar volumeSeekBar;
+    private LinearLayout volumeLayout;
     private TextView currentTimeText;
     private TextView totalTimeText;
     private TextView videoTitleText;
 
-    private String[] videoPaths = {"/sdcard/VideoEditor/4K.mp4","/sdcard/VideoEditor/1080_1VNNOX.mp4"};
+    private String[] videoPaths = {
+        Environment.getExternalStorageDirectory().getPath() + "/VideoEditor/4K.mp4",
+        Environment.getExternalStorageDirectory().getPath() + "/VideoEditor/1080_1VNNOX.mp4"
+    };
     private int currentVideoIndex = 0;
     private boolean isSurfaceReady = false;
     private boolean isPlaying = false;
     private boolean isTracking = false;
     private boolean isVideoLoaded = false;
-    
+    private boolean isFullscreen = false;
+
     private Handler uiHandler = new Handler(Looper.getMainLooper());
     private Runnable updateProgressRunnable = new Runnable() {
         @Override
@@ -91,32 +109,37 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             hpcMediaPlayer.release();
             hpcMediaPlayer = null;
         }
+        if (displaySurface != null) {
+            displaySurface.release();
+            displaySurface = null;
+        }
         uiHandler.removeCallbacksAndMessages(null);
     }
 
     private void initViews() {
-        surfaceView = findViewById(R.id.surfaceView);
-        surfaceHolder = surfaceView.getHolder();
-        surfaceHolder.addCallback(this);
+        textureView = findViewById(R.id.textureView);
+        textureView.setOnSurfaceTextureCreatedListener(this);
 
         controlPanel = findViewById(R.id.controlPanel);
         centerPlayButton = findViewById(R.id.centerPlayButton);
         playPauseButton = findViewById(R.id.playPauseButton);
         prevButton = findViewById(R.id.prevButton);
         nextButton = findViewById(R.id.nextButton);
+        rewindButton = findViewById(R.id.rewindButton);
+        fastForwardButton = findViewById(R.id.fastForwardButton);
+        volumeButton = findViewById(R.id.volumeButton);
+        fullscreenButton = findViewById(R.id.fullscreenButton);
+        settingsButton = findViewById(R.id.settingsButton);
+        playlistButton = findViewById(R.id.playlistButton);
         seekBar = findViewById(R.id.seekBar);
+        volumeSeekBar = findViewById(R.id.volumeSeekBar);
+        volumeLayout = findViewById(R.id.volumeLayout);
         currentTimeText = findViewById(R.id.currentTime);
         totalTimeText = findViewById(R.id.totalTime);
         videoTitleText = findViewById(R.id.videoTitle);
 
-        // Toggle control panel visibility on surface click
-        surfaceView.setOnClickListener(v -> {
-            if (controlPanel.getVisibility() == View.VISIBLE) {
-                controlPanel.setVisibility(View.GONE);
-            } else {
-                controlPanel.setVisibility(View.VISIBLE);
-            }
-        });
+        // Toggle control panel visibility on texture view click
+        textureView.setOnClickListener(v -> toggleControlsVisibility());
 
         // Center Play Button
         centerPlayButton.setOnClickListener(v -> togglePlayPause());
@@ -127,18 +150,34 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         // Next Button
         nextButton.setOnClickListener(v -> {
             if (hasPermissions()) {
-                currentVideoIndex = (currentVideoIndex + 1) % videoPaths.length;
-                playVideo();
+                playNextVideo();
             }
         });
 
         // Prev Button
         prevButton.setOnClickListener(v -> {
             if (hasPermissions()) {
-                currentVideoIndex = (currentVideoIndex - 1 + videoPaths.length) % videoPaths.length;
-                playVideo();
+                playPreviousVideo();
             }
         });
+
+        // Rewind Button
+        rewindButton.setOnClickListener(v -> seekBackward());
+
+        // Fast Forward Button
+        fastForwardButton.setOnClickListener(v -> seekForward());
+
+        // Volume Button
+        volumeButton.setOnClickListener(v -> toggleVolumeControl());
+
+        // Fullscreen Button
+        fullscreenButton.setOnClickListener(v -> toggleFullscreen());
+
+        // Settings Button
+        settingsButton.setOnClickListener(v -> showNotImplemented("Settings"));
+
+        // Playlist Button
+        playlistButton.setOnClickListener(v -> showNotImplemented("Playlist"));
 
         // SeekBar
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
@@ -168,6 +207,24 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 }
             }
         });
+
+        // Volume SeekBar
+        volumeSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser && hpcMediaPlayer != null) {
+                    // Assuming HpcMediaPlayer has setVolume method, otherwise show not implemented
+                    // hpcMediaPlayer.setVolume(progress / 100.0f);
+                    showNotImplemented("Volume Control");
+                }
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
     }
 
     private void initPlayer() {
@@ -178,6 +235,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 case MEDIA_PREPARED:
                     // Logic 1: MEDIA_PREPARED以后在开始start播放视频
                     if (hpcMediaPlayer != null) {
+                        isVideoLoaded = true;
                         hpcMediaPlayer.start();
                         isPlaying = true;
                         updatePlayPauseIcon();
@@ -187,8 +245,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 case MEDIA_PLAYBACK_COMPLETE:
                     // Logic 2: MEDIA_PLAYBACK_COMPLETE后 播放下一个视频
                     if (hasPermissions()) {
-                        currentVideoIndex = (currentVideoIndex + 1) % videoPaths.length;
-                        playVideo();
+                        playNextVideo();
                     }
                     break;
             }
@@ -241,6 +298,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             hpcMediaPlayer = null;
         }
         initPlayer();
+        hpcMediaPlayer.setSurface(displaySurface);
         
         // Reset UI
         seekBar.setProgress(0);
@@ -251,8 +309,64 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
         // Setup and start new video
         hpcMediaPlayer.setDataSource(videoPaths[currentVideoIndex]);
-        hpcMediaPlayer.setSurface(surfaceHolder.getSurface());
         hpcMediaPlayer.prepare();
+    }
+
+    private void playNextVideo() {
+        currentVideoIndex = (currentVideoIndex + 1) % videoPaths.length;
+        playVideo();
+    }
+
+    private void playPreviousVideo() {
+        currentVideoIndex = (currentVideoIndex - 1 + videoPaths.length) % videoPaths.length;
+        playVideo();
+    }
+
+    private void seekBackward() {
+        if (hpcMediaPlayer != null) {
+            long current = hpcMediaPlayer.getCurrentPosition();
+            long target = Math.max(0, current - SEEK_STEP_MS);
+            hpcMediaPlayer.seekTo(target);
+            currentTimeText.setText(formatTime(target));
+        }
+    }
+
+    private void seekForward() {
+        if (hpcMediaPlayer != null) {
+            long current = hpcMediaPlayer.getCurrentPosition();
+            long total = hpcMediaPlayer.getDuration();
+            long target = Math.min(total, current + SEEK_STEP_MS);
+            hpcMediaPlayer.seekTo(target);
+            currentTimeText.setText(formatTime(target));
+        }
+    }
+
+    private void toggleVolumeControl() {
+        volumeLayout.setVisibility(volumeLayout.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+    }
+
+    private void toggleFullscreen() {
+        if (isFullscreen) {
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+            isFullscreen = false;
+            fullscreenButton.setImageResource(android.R.drawable.ic_menu_crop);
+        } else {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+            isFullscreen = true;
+            fullscreenButton.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
+        }
+    }
+
+    private void toggleControlsVisibility() {
+        if (controlPanel.getVisibility() == View.VISIBLE) {
+            controlPanel.setVisibility(View.GONE);
+        } else {
+            controlPanel.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void showNotImplemented(String feature) {
+        Toast.makeText(this, feature + " feature not implemented yet", Toast.LENGTH_SHORT).show();
     }
 
     private String formatTime(long millis) {
@@ -279,26 +393,31 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     @Override
-    public void surfaceCreated(SurfaceHolder holder) {
-        surfaceHolder = holder;
+    public void onSurfaceTextureCreated(SurfaceTexture surfaceTexture) {
+        // Called when GLTextureView's SurfaceTexture is available
         isSurfaceReady = true;
+        this.surfaceTexture = surfaceTexture;
+        if (displaySurface != null) {
+            displaySurface.release();
+        }
+        displaySurface = new Surface(surfaceTexture);
+
         // Auto-play first video if permissions granted
         if (hasPermissions() && !isVideoLoaded) {
-             playVideo();
-        } else if (hpcMediaPlayer != null && isVideoLoaded) {
-             hpcMediaPlayer.setSurface(holder.getSurface());
+            playVideo();
         }
     }
 
     @Override
-    public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-    }
-
-    @Override
-    public void surfaceDestroyed(SurfaceHolder holder) {
+    public void onSurfaceTextureDestroyed() {
         isSurfaceReady = false;
+        surfaceTexture = null;
         if (hpcMediaPlayer != null) {
             hpcMediaPlayer.setSurface(null);
+        }
+        if (displaySurface != null) {
+            displaySurface.release();
+            displaySurface = null;
         }
     }
 

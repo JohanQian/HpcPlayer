@@ -2,6 +2,8 @@
 #include "common/HpcMessage.h"
 #include "common/HpcLog.h"
 
+namespace hpc {
+
 namespace {
     constexpr char kTag[] = "HpcPlayer";
 }
@@ -41,10 +43,10 @@ void HpcPlayer::setDataSource(const char* path) {
     }
 }
 
-void HpcPlayer::setSurface(std::shared_ptr<ANativeWindow> window) {
+void HpcPlayer::setSurface(std::shared_ptr<NativeWindow> window, VideoRenderMode mode) {
     std::lock_guard<std::mutex> lk(lock);
     if (core) {
-        core->setSurface(window);
+        core->setSurface(window, mode);
     }
 }
 
@@ -252,3 +254,5 @@ void HpcPlayer::notifySeekComplete() {
 void HpcPlayer::notifyDuration(int64_t durationUs) {
     this->durationUs = durationUs;
 }
+
+} // namespace hpc

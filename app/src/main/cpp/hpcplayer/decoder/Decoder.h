@@ -6,6 +6,8 @@
 #include "extractor/Extractor.h"
 #include <memory>
 
+namespace hpc {
+
 class MediaFormat;
 class Renderer;
 
@@ -40,3 +42,5 @@ protected:
     std::shared_ptr<Renderer> audioRenderer;
     std::shared_ptr<Extractor> extractor_;
 };
+
+} // namespace hpc

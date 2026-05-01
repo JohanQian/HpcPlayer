@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+namespace hpc {
+
 // Define a type alias for the underlying status type, similar to Android's status_t
 using status_t = int32_t;
 
@@ -26,3 +28,5 @@ enum class HpcStatus : status_t {
     // Operation-specific status
     kWouldBlock = -200,
 };
+
+} // namespace hpc

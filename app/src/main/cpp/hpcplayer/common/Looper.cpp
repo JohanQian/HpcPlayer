@@ -2,6 +2,8 @@
 #include "Handler.h"
 #include "HpcLog.h"
 
+namespace hpc {
+
 namespace {
     constexpr char kTag[] = "Looper";
 } 
@@ -55,7 +57,34 @@ void Looper::post(std::function<void()> task) {
     cv_.notify_one();
 }
 
+void Looper::postAndWait(std::function<void()> task) {
+    if (!task || !running_.load()) {
+        return;
+    }
+
+    if (std::this_thread::get_id() == thread_id_) {
+        task();
+        return;
+    }
+
+    auto done = std::make_shared<std::promise<void>>();
+    auto future = done->get_future();
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!running_.load()) {
+            return;
+        }
+        task_queue_.push([task = std::move(task), done]() mutable {
+            task();
+            done->set_value();
+        });
+    }
+    cv_.notify_one();
+    future.wait();
+}
+
 void Looper::run() {
+    thread_id_ = std::this_thread::get_id();
     LOG_I("Looper [%s] started.", name_.c_str());
     while (running_.load()) {
         std::function<void()> task;
@@ -78,4 +107,7 @@ void Looper::run() {
         }
     }
     LOG_I("Looper [%s] finished.", name_.c_str());
+    thread_id_ = std::thread::id();
 }
+
+} // namespace hpc

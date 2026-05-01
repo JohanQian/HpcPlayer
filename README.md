@@ -6,6 +6,62 @@
 
 HPC Player is a lightweight, high-performance media player currently built for Android using C++ and FFmpeg.
 
+## 🎯 Latest Update: SurfaceTexture + OES + EGL Rendering
+
+**New Implementation**: Complete SurfaceTexture + OES Texture + EGL Rendering system implemented entirely in C++/JNI layer.
+
+### ✨ Key Features of New Implementation
+
+- **100% C++ Core** - All OpenGL ES and EGL operations handled in native code
+- **Dedicated Render Thread** - Completely isolated from UI thread, zero UI blocking
+- **Hardware Acceleration** - Full GPU utilization with OES texture rendering
+- **Low Latency** - Real-time performance suitable for high-demanding applications
+- **Thread-Safe** - Comprehensive synchronization and error handling
+- **Extensible** - Ready for filters, effects, and advanced processing
+
+### 📖 Documentation
+
+For the new rendering implementation, please refer to:
+
+- **[QUICK_REFERENCE.md](./QUICK_REFERENCE.md)** - Quick reference and lookup tables
+- **[ARCHITECTURE.md](./ARCHITECTURE.md)** - Detailed architecture design
+- **[INTEGRATION_GUIDE.md](./INTEGRATION_GUIDE.md)** - Integration steps and build guide
+- **[IMPLEMENTATION_SUMMARY.md](./IMPLEMENTATION_SUMMARY.md)** - Complete implementation summary
+- **[CHECKLIST.md](./CHECKLIST.md)** - Delivery checklist
+
+### 🚀 Build & Run (New Implementation)
+
+```bash
+# Clean and build
+./gradlew clean assembleDebug
+
+# Install
+./gradlew installDebug
+
+# View logs
+adb logcat | grep -E "(SurfaceTextureRenderer|GLTextureView)"
+```
+
+### 📋 Files Changed
+
+**New Files (3)**
+- `SurfaceTextureRenderer.h/.cpp` - C++ rendering implementation
+- `GLTextureView.java` - Custom TextureView for rendering
+
+**Modified Files (5)**
+- `hpcplayer-native.cpp` - JNI layer enhancements
+- `CMakeLists.txt` - Build configuration updates
+- `HpcMediaPlayer.java` - Java API additions
+- `MainActivity.java` - UI integration
+- `activity_video_player.xml` - Layout updates
+
+**Documentation (5)**
+- ARCHITECTURE.md
+- INTEGRATION_GUIDE.md
+- QUICK_REFERENCE.md
+- IMPLEMENTATION_SUMMARY.md
+- CHECKLIST.md
+
 ## 🚀 Roadmap & Goals
 
 *   **Continuous Development**: This project will be actively updated with new features, optimizations, and bug fixes.

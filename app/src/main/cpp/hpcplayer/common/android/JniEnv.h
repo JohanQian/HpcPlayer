@@ -2,6 +2,8 @@
 
 #include <jni.h>
 
+namespace hpc {
+
 class JniEnv {
 public:
     JniEnv(JavaVM* vm) : jvm_(vm), env_(nullptr), attached_to_thread_(false) {
@@ -49,3 +51,5 @@ private:
     JNIEnv* env_;
     bool attached_to_thread_;
 };
+
+} // namespace hpc

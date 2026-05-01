@@ -10,6 +10,8 @@
 //#include <GLES2/gl2.h>
 //#include <thread>
 //
+//namespace hpc {
+//
 //class OpenGLRenderer final : public Renderer, public Handler {
 //public:
 //    OpenGLRenderer();
@@ -53,3 +55,5 @@
 //    std::thread thread_;
 //    bool done_ = false;
 //};
+//
+//} // namespace hpc

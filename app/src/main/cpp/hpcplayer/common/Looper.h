@@ -3,11 +3,14 @@
 #include <atomic>
 #include <condition_variable>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <queue>
 #include <string>
 #include <thread>
+
+namespace hpc {
 
 class Looper : public std::enable_shared_from_this<Looper> {
 public:
@@ -23,12 +26,14 @@ public:
     void stop();
     void quit();
     void post(std::function<void()> task);
+    void postAndWait(std::function<void()> task);
 
 private:
     void run();
 
     const std::string name_;
     std::thread thread_;
+    std::thread::id thread_id_;
 
     std::mutex mutex_;
     std::condition_variable cv_;
@@ -36,3 +41,5 @@ private:
 
     std::atomic<bool> running_{false};
 };
+
+} // namespace hpc

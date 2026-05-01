@@ -6,8 +6,12 @@
 #include "common/MediaFormat.h"
 #include "decoder/Decoder.h"
 
+namespace hpc {
+
+namespace {
 constexpr char kTag[] = "AudioOpenSLESRenderer";
 constexpr int kPcm16BitBytes = 2;
+}
 
 AudioOpenSLESRenderer::AudioOpenSLESRenderer() : Renderer("AudioOpenSLESRenderer") {
 }
@@ -318,3 +322,5 @@ bool AudioOpenSLESRenderer::createPlayer(int sampleRate, int channels) {
     }
     return true;
 }
+
+} // namespace hpc

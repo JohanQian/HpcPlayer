@@ -2,6 +2,8 @@
 
 #include "Decoder.h"
 
+namespace hpc {
+
 extern "C" {
 #include "libavcodec/avcodec.h"
 #include "libswresample/swresample.h"
@@ -31,3 +33,5 @@ private:
     AVSampleFormat targetSampleFmt = AV_SAMPLE_FMT_S16;
     int targetSampleRate = 44100;
 };
+
+} // namespace hpc

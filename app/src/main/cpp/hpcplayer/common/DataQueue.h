@@ -7,6 +7,8 @@
 #include <queue>
 #include <type_traits>
 
+namespace hpc {
+
 template <typename T>
 class DataQueue {
 public:
@@ -155,3 +157,5 @@ private:
     size_t maxSize;
     bool isAborted = false;
 };
+
+} // namespace hpc

@@ -2,6 +2,8 @@
 
 #include <chrono>
 
+namespace hpc {
+
 class Clock {
 public:
     virtual ~Clock() = default;
@@ -20,3 +22,5 @@ public:
 private:
     std::chrono::steady_clock::time_point start_time_;
 };
+
+} // namespace hpc

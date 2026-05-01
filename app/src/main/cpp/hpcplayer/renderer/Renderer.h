@@ -6,6 +6,8 @@
 #include <memory>
 #include <atomic>
 
+namespace hpc {
+
 class Decoder;
 class MediaFrame;
 class MediaClock;
@@ -22,7 +24,7 @@ public:
     void setMediaFormat(const std::shared_ptr<MediaFormat>& format) {mediaFormat = format;}
     void queueBuffer(const std::shared_ptr<MediaFrame>);
     void start();
-    void stop();
+    virtual void stop();
     void flush();
     void pause();
     void resume();
@@ -59,5 +61,7 @@ protected:
 
     std::atomic<bool> isFirstFrame{true};
 };
+
+} // namespace hpc
 
 #endif // HPC_PLAYER_RENDERER_RENDERER_H_

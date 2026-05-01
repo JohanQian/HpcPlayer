@@ -8,10 +8,13 @@
 #include "decoder/andriod/MediaCodecVideoDecoder.h"
 #include "renderer/andriod/OpenGLRenderer.h"
 #include "renderer/andriod/MediaCodecRenderer.h"
+#include "renderer/andriod/SurfaceTextureRenderer.h"
 #include "renderer/andriod/AudioOpenSLESRenderer.h"
 #include "common/HpcMessage.h"
 #include "common/MediaClock.h"
 #include "HpcPlayer.h"
+
+namespace hpc {
 
 namespace {
     constexpr char kTag[] = "HpcCore";
@@ -35,21 +38,13 @@ void HpcCore::init() {
     // Initialize MediaClock
     mediaClock = std::make_shared<MediaClock>();
     
-    // Initialize Renderers
-    videoRenderer = std::make_shared<MediaCodecRenderer>();
-    
-    // Set MediaClock to Renderers
-    videoRenderer->setMediaClock(mediaClock);
-
     // Initialize Decoders
     videoLooper = std::make_shared<Looper>("VideoDecoder");
     videoLooper->start(); // Start the looper!
     videoDecoder = std::make_shared<MediaCodecVideoDecoder>(videoLooper);
     videoDecoder->setExtractor(extractor);
-    videoDecoder->setRenderer(videoRenderer);
 
-    // Connect Renderers to Decoders (for pulling frames)
-    videoRenderer->setDecoder(videoDecoder);
+    useVideoRenderer(VideoRenderMode::SurfaceTextureOes);
 
     isRunning.store(true);
 }
@@ -82,8 +77,8 @@ void HpcCore::setDataSource(std::string_view path) {
     }
 }
 
-void HpcCore::setSurface(const std::shared_ptr<ANativeWindow>& window) {
-    sendMessage({.what = kWhatSetVideoSurface, .obj = window});
+void HpcCore::setSurface(const std::shared_ptr<NativeWindow>& window, VideoRenderMode mode) {
+    sendMessage({.what = kWhatSetVideoSurface, .arg1 = static_cast<int64_t>(mode), .obj = window});
 }
 
 void HpcCore::prepare() {
@@ -151,16 +146,49 @@ void HpcCore::onMessageReceived(const Message& msg) {
             doRelease(); 
             break;
         case kWhatSetVideoSurface: {
-            if (videoDecoder) {
-                if (auto mcDecoder = dynamic_cast<MediaCodecVideoDecoder*>(videoDecoder.get())) {
-                    mcDecoder->setNativeWindow(std::static_pointer_cast<ANativeWindow>(msg.obj));
+            const auto renderMode = static_cast<VideoRenderMode>(msg.arg1);
+            useVideoRenderer(renderMode);
+
+            std::shared_ptr<NativeWindow> decoderWindow = std::static_pointer_cast<NativeWindow>(msg.obj);
+            if (renderMode == VideoRenderMode::SurfaceTextureOes && videoRenderer) {
+                if (auto surfaceTextureRenderer = std::dynamic_pointer_cast<SurfaceTextureRenderer>(videoRenderer)) {
+                    decoderWindow = surfaceTextureRenderer->setOutputWindow(decoderWindow);
                 }
             }
-            if (videoRenderer) {
-                 videoRenderer->init();
+            if (videoDecoder) {
+                if (auto mcDecoder = std::dynamic_pointer_cast<MediaCodecVideoDecoder>(videoDecoder)) {
+                    mcDecoder->setNativeWindow(decoderWindow);
+                }
             }
             break;
         }
+    }
+}
+
+void HpcCore::useVideoRenderer(VideoRenderMode mode) {
+    const bool wantTunnel = mode == VideoRenderMode::Tunnel;
+    const bool hasTunnelRenderer = std::dynamic_pointer_cast<MediaCodecRenderer>(videoRenderer) != nullptr;
+    const bool hasOesRenderer = std::dynamic_pointer_cast<SurfaceTextureRenderer>(videoRenderer) != nullptr;
+
+    if ((wantTunnel && hasTunnelRenderer) || (!wantTunnel && hasOesRenderer)) {
+        return;
+    }
+
+    if (videoRenderer) {
+        if (auto surfaceTextureRenderer = std::dynamic_pointer_cast<SurfaceTextureRenderer>(videoRenderer)) {
+            surfaceTextureRenderer->setOutputWindow(nullptr);
+        }
+        videoRenderer->stop();
+    }
+
+    videoRenderer = wantTunnel
+            ? std::static_pointer_cast<Renderer>(std::make_shared<MediaCodecRenderer>())
+            : std::static_pointer_cast<Renderer>(std::make_shared<SurfaceTextureRenderer>());
+
+    videoRenderer->setMediaClock(mediaClock);
+    if (videoDecoder) {
+        videoDecoder->setRenderer(videoRenderer);
+        videoRenderer->setDecoder(videoDecoder);
     }
 }
 
@@ -228,19 +256,19 @@ void HpcCore::doStop() {
         extractor->stop();
     }
     isPlaying.store(false);
-    
-    if (videoDecoder) {
-        videoDecoder->stop();
-    }
-    if (audioDecoder) {
-        audioDecoder->stop();
-    }
-    
+
     if (videoRenderer) {
         videoRenderer->stop();
     }
     if (audioRenderer) {
         audioRenderer->stop();
+    }
+
+    if (videoDecoder) {
+        videoDecoder->stop();
+    }
+    if (audioDecoder) {
+        audioDecoder->stop();
     }
 }
 
@@ -339,3 +367,5 @@ void HpcCore::onSourceNotify(const Message &msg) {
         }
     }
 }
+
+} // namespace hpc

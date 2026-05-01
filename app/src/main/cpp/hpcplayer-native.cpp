@@ -5,6 +5,34 @@
 
 #include "hpcplayer/HpcPlayer.h"
 #include "HpcPlayerInterface.h"
+#include "hpcplayer/renderer/andriod/NativeWindow.h"
+
+using namespace hpc;
+
+namespace {
+JavaVM* gJavaVm = nullptr;
+jclass gPlayerClass = nullptr;
+jmethodID gCreateSurfaceTextureMethod = nullptr;
+jmethodID gCreateSurfaceMethod = nullptr;
+}
+
+JavaVM* GetHpcJavaVm() {
+    return gJavaVm;
+}
+
+jobject HpcCreateSurfaceTexture(JNIEnv* env, jint textureId) {
+    if (!env || !gPlayerClass || !gCreateSurfaceTextureMethod) {
+        return nullptr;
+    }
+    return env->CallStaticObjectMethod(gPlayerClass, gCreateSurfaceTextureMethod, textureId);
+}
+
+jobject HpcCreateSurface(JNIEnv* env, jobject surfaceTexture) {
+    if (!env || !surfaceTexture || !gPlayerClass || !gCreateSurfaceMethod) {
+        return nullptr;
+    }
+    return env->CallStaticObjectMethod(gPlayerClass, gCreateSurfaceMethod, surfaceTexture);
+}
 
 // Helper to cast the jlong back to a shared_ptr<HpcPlayer>
 // The jlong is actually a pointer to a shared_ptr<HpcPlayer> on the heap.
@@ -79,6 +107,41 @@ void JNIHpcPlayerListener::notify(int msg, int ext1, int ext2, const void *obj) 
 
 extern "C" {
 
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
+    gJavaVm = vm;
+
+    JNIEnv* env = nullptr;
+    if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+        return JNI_ERR;
+    }
+
+    jclass localClass = env->FindClass("com/example/hpcplayer/HpcMediaPlayer");
+    if (!localClass) {
+        return JNI_ERR;
+    }
+
+    gPlayerClass = static_cast<jclass>(env->NewGlobalRef(localClass));
+    env->DeleteLocalRef(localClass);
+    if (!gPlayerClass) {
+        return JNI_ERR;
+    }
+
+    gCreateSurfaceTextureMethod = env->GetStaticMethodID(
+            gPlayerClass,
+            "createSurfaceTexture",
+            "(I)Landroid/graphics/SurfaceTexture;");
+    gCreateSurfaceMethod = env->GetStaticMethodID(
+            gPlayerClass,
+            "createSurface",
+            "(Landroid/graphics/SurfaceTexture;)Landroid/view/Surface;");
+
+    if (!gCreateSurfaceTextureMethod || !gCreateSurfaceMethod) {
+        return JNI_ERR;
+    }
+
+    return JNI_VERSION_1_6;
+}
+
 JNIEXPORT jlong JNICALL
 Java_com_example_hpcplayer_HpcMediaPlayer_nativeInit(JNIEnv* env, jobject thiz) {
     // Create HpcPlayer using create() which returns a shared_ptr
@@ -114,20 +177,24 @@ Java_com_example_hpcplayer_HpcMediaPlayer_nativeSetDataSource(JNIEnv* env, jobje
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_hpcplayer_HpcMediaPlayer_nativeSetSurface(JNIEnv* env, jobject thiz, jlong player_ptr, jobject surface) {
+Java_com_example_hpcplayer_HpcMediaPlayer_nativeSetSurface(JNIEnv* env, jobject thiz, jlong player_ptr, jobject surfaceObj, jboolean tunnelMode) {
     if (auto player = FromLong(player_ptr)) {
-        ANativeWindow* window = nullptr;
-        if (surface != nullptr) {
-            window = ANativeWindow_fromSurface(env, surface);
-        }
-
-        if (window) {
-            player->setSurface(std::shared_ptr<ANativeWindow>(window, ANativeWindow_release));
+        const auto renderMode = tunnelMode
+                ? VideoRenderMode::Tunnel
+                : VideoRenderMode::SurfaceTextureOes;
+        if (surfaceObj != nullptr) {
+            ANativeWindow* window = ANativeWindow_fromSurface(env, surfaceObj);
+            if (window) {
+                player->setSurface(std::make_shared<NativeWindow>(window), renderMode);
+            } else {
+                player->setSurface(nullptr, renderMode);
+            }
         } else {
-            player->setSurface(nullptr);
+            player->setSurface(nullptr, renderMode);
         }
     }
 }
+
 
 JNIEXPORT void JNICALL
 Java_com_example_hpcplayer_HpcMediaPlayer_nativePrepare(JNIEnv* env, jobject thiz, jlong player_ptr) {

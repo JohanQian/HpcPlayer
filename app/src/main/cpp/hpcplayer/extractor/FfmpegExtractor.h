@@ -9,6 +9,8 @@
 #include <mutex>
 #include <vector>
 
+namespace hpc {
+
 extern "C" {
 #include "libavformat/avformat.h"
 #include "libavcodec/avcodec.h"
@@ -73,3 +75,4 @@ private:
     DataQueue<std::shared_ptr<MediaSample>> videoPacketQueue{60};
     DataQueue<std::shared_ptr<MediaSample>> audioPacketQueue{200};
 };
+} // namespace hpc

@@ -3,6 +3,8 @@
 #include "renderer/Renderer.h"
 #include "common/Message.h"
 
+namespace hpc {
+
 Decoder::Decoder(const std::shared_ptr<Looper>& looper) : Handler(looper) {}
 
 Decoder::~Decoder() = default;
@@ -24,7 +26,7 @@ void Decoder::start() {
 }
 
 void Decoder::stop() {
-    sendMessage({kWhatStop});
+    sendMessageAndWait({kWhatStop});
 }
 
 void Decoder::flush() {
@@ -34,3 +36,5 @@ void Decoder::flush() {
 void Decoder::requestInputBuffers() {
     sendMessage({kWhatRequestInputBuffers});
 }
+
+} // namespace hpc

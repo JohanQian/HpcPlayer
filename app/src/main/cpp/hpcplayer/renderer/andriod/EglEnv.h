@@ -5,8 +5,9 @@
 
 #include "common/HpcStatus.h"
 
-// Forward-declare
 struct ANativeWindow;
+
+namespace hpc {
 
 class EglEnv final {
 public:
@@ -30,5 +31,7 @@ private:
     EGLContext context_ = EGL_NO_CONTEXT;
     EGLSurface surface_ = EGL_NO_SURFACE;
 };
+
+} // namespace hpc
 
 #endif  // MEDIA_PLAYER_TEST_APP_SRC_MAIN_CPP_RENDERER_ANDRIOD_EGLENV_H_

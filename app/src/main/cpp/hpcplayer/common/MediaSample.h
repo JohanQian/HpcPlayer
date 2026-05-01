@@ -4,6 +4,8 @@
 #include <memory>
 #include <vector>
 
+namespace hpc {
+
 /**
  * @brief Represents a single compressed media sample (e.g., a video NAL unit or an audio frame).
  *
@@ -26,3 +28,5 @@ struct MediaSample {
 
     bool is_seek_frame = false;
 };
+
+} // namespace hpc

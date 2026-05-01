@@ -5,6 +5,8 @@
 #include "common/MediaSample.h"
 #include "../HpcCore.h"
 
+namespace hpc {
+
 extern "C" {
 #include "libavutil/error.h"
 #include "libavcodec/avcodec.h"
@@ -366,3 +368,5 @@ void FfmpegExtractor::notifyPrepared(status_t err) {
         c->sendMessage({.what = HpcCore::kWhatSourceNotify, .obj = msg});
     }
 }
+
+} // namespace hpc

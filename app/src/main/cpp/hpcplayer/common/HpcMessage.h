@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+namespace hpc {
+
 // A simple definition for status_t, commonly used in Android native code.
 using status_t = int32_t;
 
@@ -26,3 +28,5 @@ enum HpcMessage : int32_t {
     // Generic error
     MSG_ERROR = 900,
 };
+
+} // namespace hpc

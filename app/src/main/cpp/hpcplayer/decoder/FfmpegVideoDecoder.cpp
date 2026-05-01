@@ -5,6 +5,8 @@
 #include "common/Message.h"
 #include "common/MediaSample.h"
 
+namespace hpc {
+
 namespace {
     constexpr char kTag[] = "FfmpegVideoDecoder";
 }
@@ -152,3 +154,5 @@ void FfmpegVideoDecoder::doRequestInputBuffers() {
         sendMessage({kWhatRequestInputBuffers});
     }
 }
+
+} // namespace hpc

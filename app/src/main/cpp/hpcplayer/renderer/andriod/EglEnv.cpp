@@ -1,6 +1,8 @@
 #include "EglEnv.h"
 #include "common/HpcLog.h"
 
+namespace hpc {
+
 namespace {
     constexpr char kTag[] = "EglEnv";
 } // namespace
@@ -94,3 +96,5 @@ void EglEnv::Release() {
         display_ = EGL_NO_DISPLAY;
     }
 }
+
+} // namespace hpc

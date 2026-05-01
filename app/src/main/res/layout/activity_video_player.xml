@@ -4,8 +4,8 @@
     android:layout_height="match_parent"
     android:background="#000000">
 
-    <SurfaceView
-        android:id="@+id/surfaceView"
+    <com.example.hpcplayer.GLTextureView
+        android:id="@+id/textureView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_centerInParent="true" />
@@ -26,27 +26,40 @@
             android:orientation="horizontal"
             android:padding="16dp"
             android:background="#80000000">
-            
+
             <TextView
                 android:id="@+id/videoTitle"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_weight="1"
                 android:text="Video Title"
                 android:textColor="#FFFFFF"
                 android:textSize="18sp"
-                android:textStyle="bold"/>
+                android:textStyle="bold"
+                android:ellipsize="end"
+                android:maxLines="1"/>
+
+            <ImageButton
+                android:id="@+id/settingsButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@android:color/transparent"
+                android:src="@android:drawable/ic_menu_preferences"
+                android:tint="#FFFFFF"
+                android:contentDescription="Settings"/>
         </LinearLayout>
 
         <!-- Center Play/Pause Button -->
         <ImageButton
             android:id="@+id/centerPlayButton"
-            android:layout_width="64dp"
-            android:layout_height="64dp"
+            android:layout_width="80dp"
+            android:layout_height="80dp"
             android:layout_centerInParent="true"
-            android:background="@android:color/transparent"
+            android:background="@drawable/play_button_background"
             android:src="@android:drawable/ic_media_play"
             android:scaleType="fitCenter"
-            android:tint="#FFFFFF"/>
+            android:tint="#FFFFFF"
+            android:padding="16dp"/>
 
         <!-- Bottom Controls -->
         <LinearLayout
@@ -62,7 +75,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:gravity="center_vertical">
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
 
                 <TextView
                     android:id="@+id/currentTime"
@@ -79,7 +93,9 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:max="100"
-                    android:progress="0"/>
+                    android:progress="0"
+                    android:thumbTint="#FFFFFF"
+                    android:progressTint="#FFFFFF"/>
 
                 <TextView
                     android:id="@+id/totalTime"
@@ -91,6 +107,34 @@
                     android:paddingStart="8dp"/>
             </LinearLayout>
 
+            <!-- Volume Control -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp"
+                android:visibility="gone"
+                android:id="@+id/volumeLayout">
+
+                <ImageView
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:src="@android:drawable/ic_lock_silent_mode_off"
+                    android:tint="#FFFFFF"
+                    android:layout_marginEnd="8dp"/>
+
+                <SeekBar
+                    android:id="@+id/volumeSeekBar"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:max="100"
+                    android:progress="50"
+                    android:thumbTint="#FFFFFF"
+                    android:progressTint="#FFFFFF"/>
+            </LinearLayout>
+
             <!-- Control Buttons -->
             <LinearLayout
                 android:layout_width="match_parent"
@@ -100,21 +144,44 @@
                 android:paddingTop="8dp">
 
                 <ImageButton
+                    android:id="@+id/playlistButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="@android:color/transparent"
+                    android:src="@android:drawable/ic_menu_agenda"
+                    android:tint="#FFFFFF"
+                    android:layout_marginEnd="16dp"
+                    android:contentDescription="Playlist"/>
+
+                <ImageButton
+                    android:id="@+id/rewindButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="@android:color/transparent"
+                    android:src="@android:drawable/ic_media_rew"
+                    android:tint="#FFFFFF"
+                    android:layout_marginEnd="16dp"
+                    android:contentDescription="Rewind 10s"/>
+
+                <ImageButton
                     android:id="@+id/prevButton"
                     android:layout_width="48dp"
                     android:layout_height="48dp"
                     android:background="@android:color/transparent"
                     android:src="@android:drawable/ic_media_previous"
                     android:tint="#FFFFFF"
-                    android:layout_marginEnd="32dp"/>
+                    android:layout_marginEnd="16dp"
+                    android:contentDescription="Previous"/>
 
                 <ImageButton
                     android:id="@+id/playPauseButton"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
+                    android:layout_width="64dp"
+                    android:layout_height="64dp"
                     android:background="@android:color/transparent"
                     android:src="@android:drawable/ic_media_play"
-                    android:tint="#FFFFFF"/>
+                    android:tint="#FFFFFF"
+                    android:layout_marginEnd="16dp"
+                    android:contentDescription="Play/Pause"/>
 
                 <ImageButton
                     android:id="@+id/nextButton"
@@ -123,8 +190,37 @@
                     android:background="@android:color/transparent"
                     android:src="@android:drawable/ic_media_next"
                     android:tint="#FFFFFF"
-                    android:layout_marginStart="32dp"/>
+                    android:layout_marginEnd="16dp"
+                    android:contentDescription="Next"/>
 
+                <ImageButton
+                    android:id="@+id/fastForwardButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="@android:color/transparent"
+                    android:src="@android:drawable/ic_media_ff"
+                    android:tint="#FFFFFF"
+                    android:layout_marginEnd="16dp"
+                    android:contentDescription="Fast Forward 10s"/>
+
+                <ImageButton
+                    android:id="@+id/volumeButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="@android:color/transparent"
+                    android:src="@android:drawable/ic_lock_silent_mode_off"
+                    android:tint="#FFFFFF"
+                    android:layout_marginEnd="16dp"
+                    android:contentDescription="Volume"/>
+
+                <ImageButton
+                    android:id="@+id/fullscreenButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="@android:color/transparent"
+                    android:src="@android:drawable/ic_menu_crop"
+                    android:tint="#FFFFFF"
+                    android:contentDescription="Fullscreen"/>
             </LinearLayout>
         </LinearLayout>
     </RelativeLayout>

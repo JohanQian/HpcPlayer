@@ -1,5 +1,7 @@
 #include "MediaClock.h"
 
+namespace hpc {
+
 MediaClock::MediaClock() {
 }
 
@@ -111,3 +113,5 @@ void MediaClock::onRendererDisabled() {
         rendererClock = nullptr;
     }
 }
+
+} // namespace hpc

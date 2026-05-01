@@ -8,6 +8,8 @@
 #include <unistd.h>
 #include <thread>
 
+namespace hpc {
+
 constexpr char kTag[] = "Renderer";
 
 Renderer::Renderer(std::string name) 
@@ -43,8 +45,13 @@ void Renderer::start() {
 }
 
 void Renderer::stop() {
-    pause();
-    flush();
+    isPaused = true;
+    if (mediaClock) {
+        mediaClock->stop();
+    }
+    isFlushing = true;
+    frameQueue.flush();
+    sendMessageAndWait({kWhatFlush});
 }
 
 void Renderer::flush() {
@@ -145,3 +152,5 @@ bool Renderer::syncFrame(const std::shared_ptr<MediaFrame>& frame) {
         }
     }
 }
+
+} // namespace hpc

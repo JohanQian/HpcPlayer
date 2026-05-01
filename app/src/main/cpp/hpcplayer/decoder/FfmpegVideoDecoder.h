@@ -2,6 +2,8 @@
 
 #include "Decoder.h"
 
+namespace hpc {
+
 extern "C" {
 #include "libavcodec/avcodec.h"
 #include "libswscale/swscale.h"
@@ -32,3 +34,5 @@ private:
     int targetHeight = 0;
     AVPixelFormat targetPixelFormat = AV_PIX_FMT_RGBA;
 };
+
+} // namespace hpc

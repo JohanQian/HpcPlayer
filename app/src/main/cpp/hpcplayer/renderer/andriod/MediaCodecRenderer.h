@@ -3,6 +3,8 @@
 
 #include "../Renderer.h"
 
+namespace hpc {
+
 class MediaCodecRenderer final : public Renderer {
 public:
     MediaCodecRenderer();
@@ -21,5 +23,7 @@ private:
     void notifyConsume();
 
 };
+
+} // namespace hpc
 
 #endif // HPC_PLAYER_RENDERER_ANDROID_MEDIA_CODEC_RENDERER_H_

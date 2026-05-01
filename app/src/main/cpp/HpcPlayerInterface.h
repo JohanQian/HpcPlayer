@@ -5,6 +5,15 @@
 #include <mutex>
 #include <android/native_window.h>
 
+namespace hpc {
+
+class NativeWindow;
+
+enum class VideoRenderMode {
+    SurfaceTextureOes = 0,
+    Tunnel = 1,
+};
+
 enum media_event_type {
     MEDIA_NOP               = 0, // interface test message
     MEDIA_PREPARED          = 1,
@@ -30,7 +39,7 @@ public:
     virtual ~HpcPlayerInterface() = default;
 
     virtual void setDataSource(const char* path) = 0;
-    virtual void setSurface(std::shared_ptr<ANativeWindow> window) = 0;
+    virtual void setSurface(std::shared_ptr<NativeWindow> window, VideoRenderMode mode = VideoRenderMode::SurfaceTextureOes) = 0;
     virtual void prepareAsync() = 0;
     virtual void start() = 0;
     virtual void resume() = 0;
@@ -47,3 +56,5 @@ protected:
     std::shared_ptr<HpcPlayerListener> mListener;
     std::mutex mNotifyLock;
 };
+
+} // namespace hpc

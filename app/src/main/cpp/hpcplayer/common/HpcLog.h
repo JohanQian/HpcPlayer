@@ -2,6 +2,8 @@
 
 #include <android/log.h>
 
+namespace hpc {
+
 /**
  * A set of logging macros that automatically use a "kTag" variable
  * expected to be defined in the compilation unit.
@@ -32,3 +34,5 @@
 
 #define LOG_V(...) \
     __android_log_print(ANDROID_LOG_VERBOSE, kTag, __VA_ARGS__)
+
+} // namespace hpc

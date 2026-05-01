@@ -14,6 +14,8 @@
 #include "../Renderer.h"
 #include "common/Message.h"
 
+namespace hpc {
+
 class AudioOpenSLESRenderer final : public Renderer {
 public:
     AudioOpenSLESRenderer();
@@ -60,5 +62,7 @@ private:
     std::shared_ptr<MediaFrame> pendingFrame{nullptr};
 
 };
+
+} // namespace hpc
 
 #endif

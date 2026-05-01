@@ -16,10 +16,16 @@
 #include "decoder/Decoder.h"
 #include "extractor/Extractor.h"
 #include "renderer/Renderer.h"
+#include "../HpcPlayerInterface.h"
 
 struct ANativeWindow;
+
+namespace hpc {
+
 class MediaClock;
 class HpcPlayer;
+
+class NativeWindow;
 
 struct PlayerConfig {
     bool useHardwareDecoding = true;
@@ -34,7 +40,7 @@ public:
     void setMessageCallback(std::function<void(const Message&)> callback);
 
     void setDataSource(std::string_view path);
-    void setSurface(const std::shared_ptr<ANativeWindow>& window);
+    void setSurface(const std::shared_ptr<NativeWindow>& window, VideoRenderMode mode = VideoRenderMode::SurfaceTextureOes);
     void prepare();
     void start();
     void resume();
@@ -62,6 +68,7 @@ private:
     explicit HpcCore(std::weak_ptr<HpcPlayer> player,std::shared_ptr<Looper> looper);
     void init();
     void initDecoder();
+    void useVideoRenderer(VideoRenderMode mode);
 
     void onMessageReceived(const Message& msg) override;
 
@@ -101,5 +108,7 @@ private:
     
     std::weak_ptr<HpcPlayer> player;
 };
+
+} // namespace hpc
 
 #endif // HPC_PLAYER_HPC_CORE_H_

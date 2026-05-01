@@ -2,8 +2,11 @@
 
 #include "../Decoder.h"
 #include <media/NdkMediaCodec.h>
+#include <memory>
 
-struct ANativeWindow;
+namespace hpc {
+
+class NativeWindow;
 struct MediaSample;
 
 class MediaCodecVideoDecoder final : public Decoder {
@@ -11,7 +14,7 @@ public:
     explicit MediaCodecVideoDecoder(const std::shared_ptr<Looper>& looper);
     ~MediaCodecVideoDecoder() override;
 
-    void setNativeWindow(const std::shared_ptr<ANativeWindow>& window);
+    void setNativeWindow(const std::shared_ptr<NativeWindow>& window);
     AMediaCodec* getCodec() const;
 
 protected:
@@ -27,9 +30,11 @@ private:
     void doRequestInputBuffers();
 
     AMediaCodec* codec = nullptr;
-    std::shared_ptr<ANativeWindow> nativeWindow = nullptr;
+    std::shared_ptr<NativeWindow> nativeWindow = nullptr;
     bool codecStarted = false;
 
     std::shared_ptr<MediaSample> pendingSample = nullptr;
     bool isInputEosQueued = false;
 };
+
+} // namespace hpc

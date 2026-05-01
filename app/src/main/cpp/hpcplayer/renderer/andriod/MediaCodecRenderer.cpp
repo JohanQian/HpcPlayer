@@ -4,6 +4,9 @@
 #include "decoder/Decoder.h"
 #include <media/NdkMediaCodec.h>
 #include "common/MediaClock.h"
+#include "common/MediaFrame.h"
+
+namespace hpc {
 
 MediaCodecRenderer::MediaCodecRenderer() : Renderer("MediaCodecRenderer") {}
 
@@ -89,7 +92,7 @@ void MediaCodecRenderer::notifyConsume() {
             doRender(frame);
         }
     } else {
-        sendMessage({kWhatConsume});
+        sendMessageDelayed({kWhatConsume}, 5);
     }
 }
 
@@ -106,3 +109,5 @@ void MediaCodecRenderer::doRender(const std::shared_ptr<MediaFrame>& frame) {
 
     sendMessage({kWhatConsume});
 }
+
+} // namespace hpc
